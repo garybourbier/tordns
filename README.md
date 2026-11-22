@@ -102,6 +102,11 @@ Puisque les systèmes d'exploitation envoient historiquement le DNS en UDP sur l
 - Service d'arrière-plan Windows avec gestionnaire de loopback TAP/WinTun.
 - Packaging et installateurs signés.
 
+### Chantier 2 : réseau redondant, nœuds bénévoles, mises à jour signées
+Plusieurs nœuds derrière une adresse Onionbalance, admission automatique des bénévoles dans un
+pool « communauté » séparé, mises à jour signées pour les nœuds et les clients. Détail et
+missions 7 à 13 : `docs/missions/00-lire-moi.md`.
+
 ---
 
 ## 4. Règles de Sécurité et Bonnes Pratiques
