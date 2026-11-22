@@ -36,7 +36,7 @@ mkdir -p "$CONSTRUCTION/gen" "$CONSTRUCTION/classes" "$CONSTRUCTION/dex"
     -I "$ANDROID_JAR" \
     --manifest "$RACINE/app/src/main/AndroidManifest.xml" \
     --java "$CONSTRUCTION/gen" \
-    --min-sdk-version 26 --target-sdk-version 34 \
+    --min-sdk-version 26 --target-sdk-version 34 --debug-mode \
     --version-code 1 --version-name 0.1 \
     "$CONSTRUCTION/res.zip"
 

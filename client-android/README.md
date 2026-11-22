@@ -100,10 +100,27 @@ primaryCpuAbi=arm64-v8a
 Installé et lancé sur un Samsung SM-A546B (Android 16, arm64) ; `zipalign -c -p 4`
 passe, signature APK vérifiée.
 
+**4. Chemin Arti/DoH complet sur l'appareil, sans VPN.** L'APK étant construit
+en mode debug (`--debug-mode`), une intention de diagnostic réservée aux builds
+débogables démarre le bootstrap puis une requête, même écran verrouillé :
+
+```bash
+adb shell am start -n org.tordns.client/.MainActivity \
+  --ez diagnostic true --es onion <adresse>.onion
+# I TorDNS: bootstrap : retour OK
+# I TorDNS: diagnostic DoH sur l'appareil : rcode=0 reponses=2 apres 40004 ms
+```
+
+L'activité de diagnostic se déclare `showWhenLocked` : sans cela, Android gèle
+le processus derrière l'écran de verrouillage et le bootstrap ne progresse
+jamais. Aucun nom de domaine n'est journalisé, seul le code de réponse.
+
 **Non vérifié ici** : l'activation effective du tunnel. L'appareil de test est
 verrouillé par code et la boîte de consentement VPN exige une action de
-l'utilisateur ; aucun contournement n'a été tenté. La capture TUN, elle, est
-couverte par les tests de paquets et par la revue du service.
+l'utilisateur ; le service n'est pas exporté et `prepare()` ne peut pas être
+contourné sans ce consentement. La capture TUN est couverte par les tests de
+paquets et le chemin Tor par le diagnostic ci-dessus, mais pas par un ping réel
+à travers le VPN.
 
 ## Sécurité et limites
 
@@ -123,6 +140,8 @@ couverte par les tests de paquets et par la revue du service.
 - **Arm64 uniquement** dans ce build ; `minSdk 26`. Une compilation x86_64 pour
   émulateur se fait en changeant la cible dans `scripts/construire.sh`.
 - La notification de service permanent utilise le type `specialUse` (Android 14).
+- Le point d'entrée de diagnostic (`--ez diagnostic true`) est inactif hors APK
+  débogable ; il ne sert qu'aux preuves locales sur appareil.
 - Arti met 20 à 90 s à démarrer au premier lancement ; les requêtes reçues
   avant la fin du bootstrap reçoivent un SERVFAIL, que les clients retentent.
 

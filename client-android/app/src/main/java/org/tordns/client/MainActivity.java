@@ -3,6 +3,7 @@ package org.tordns.client;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.net.VpnService;
 import android.os.Bundle;
 import android.os.Handler;
@@ -139,6 +140,51 @@ public class MainActivity extends Activity {
         setContentView(defilement);
 
         boucle.post(rafraichir);
+
+        // Diagnostic réservé aux APK de débogage : permet de valider le chemin
+        // Arti/DoH depuis adb, même écran verrouillé, sans activer de VPN.
+        // Aucun nom de domaine n'est journalisé, seul le code de réponse.
+        Intent lancement = getIntent();
+        if (lancement != null && lancement.getBooleanExtra("diagnostic", false)
+                && (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            // Sans cela, l'activité derrière l'écran de verrouillage est gelée
+            // par Android et le bootstrap Arti ne progresse jamais.
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+            diagnostic(lancement.getStringExtra("onion"));
+        }
+    }
+
+    private void diagnostic(String onion) {
+        if (onion == null || !onion.endsWith(".onion")) {
+            android.util.Log.e("TorDNS", "diagnostic : adresse .onion absente");
+            return;
+        }
+        final Resolveur r = Resolveur.INSTANCE;
+        r.configurer(onion);
+        new Thread(() -> {
+            android.util.Log.i("TorDNS", "diagnostic : démarrage");
+            long debut = System.nanoTime();
+            r.demarrer(getApplicationContext(), null);
+            long limite = System.currentTimeMillis() + 180_000L;
+            while (!r.pret() && System.currentTimeMillis() < limite) {
+                try {
+                    Thread.sleep(10_000);
+                    android.util.Log.i("TorDNS", "diagnostic : attente (" + r.etat() + ")");
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+            if (!r.pret()) {
+                android.util.Log.e("TorDNS", "diagnostic : Tor non prêt (" + r.etat() + ")");
+                return;
+            }
+            long ms = (System.nanoTime() - debut) / 1_000_000L;
+            byte[] reponse = r.resoudre(requeteA("example.com"));
+            android.util.Log.i("TorDNS", String.format(Locale.ROOT,
+                    "diagnostic DoH sur l'appareil : rcode=%d reponses=%d apres %d ms",
+                    DnsMessage.rcode(reponse), DnsMessage.nombreReponses(reponse), ms));
+        }, "diagnostic").start();
     }
 
     private TextView etiquette(String texte) {
@@ -215,6 +261,7 @@ public class MainActivity extends Activity {
         }
         final String domaineFinal = domaine;
         new Thread(() -> {
+            android.util.Log.i("TorDNS", "diagnostic : démarrage");
             long debut = System.nanoTime();
             byte[] requete = requeteA(domaineFinal);
             byte[] reponse = r.resoudre(requete);
@@ -226,7 +273,7 @@ public class MainActivity extends Activity {
         }, "test-dns").start();
     }
 
-    private static byte[] requeteA(String domaine) {
+    static byte[] requeteA(String domaine) {
         java.io.ByteArrayOutputStream sortie = new java.io.ByteArrayOutputStream();
         sortie.write(new Random().nextInt(65536) >> 8);
         sortie.write(new Random().nextInt(256));

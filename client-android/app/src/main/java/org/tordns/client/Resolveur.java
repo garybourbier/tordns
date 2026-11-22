@@ -87,11 +87,13 @@ final class Resolveur {
             ecouteur.surEtat(etat);
         }
         Thread fil = new Thread(() -> {
+            android.util.Log.i("TorDNS", "bootstrap : appel Arti");
             File etatDir = new File(contexte.getFilesDir(), "arti-etat");
             File cacheDir = new File(contexte.getCacheDir(), "arti-cache");
             etatDir.mkdirs();
             cacheDir.mkdirs();
             String erreur = Arti.demarrer(etatDir.getAbsolutePath(), cacheDir.getAbsolutePath());
+            android.util.Log.i("TorDNS", "bootstrap : retour " + (erreur == null ? "OK" : erreur));
             if (erreur == null) {
                 pret = true;
                 etat = "Tor prêt";
