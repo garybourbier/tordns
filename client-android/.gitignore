@@ -1,0 +1,5 @@
+build/
+rust/target/
+app/src/main/jniLibs/
+*.keystore
+*.apk

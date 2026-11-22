@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TorDNS</string>
+    <string name="canal_nom">TorDNS</string>
+    <string name="canal_desc">Relais DNS local</string>
+    <string name="notif_titre">TorDNS actif</string>
+    <string name="notif_texte">Les requêtes DNS passent par Tor</string>
+</resources>
