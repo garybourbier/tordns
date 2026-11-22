@@ -13,6 +13,10 @@ http://:8080 {
 		output discard
 	}
 
+	handle /healthz {
+		reverse_proxy passerelle:8053
+	}
+
 	handle /dns-query {
 		reverse_proxy passerelle:8053 {
 			# Ne transmettre aucune métadonnée client inutile.

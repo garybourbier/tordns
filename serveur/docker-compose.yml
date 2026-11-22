@@ -1,8 +1,26 @@
-# TorDNS — stack serveur locale (Mission 1)
+# TorDNS — stack serveur locale (Missions 1 à 3)
 # Aucune de ces images ne publie autre chose que 127.0.0.1 sur l'hôte.
 # Aucun journal de requêtes : ni Unbound, ni la passerelle, ni Caddy n'écrivent
 # le détail des questions DNS (voir serveur/README.md).
 name: tordns
+
+# Durcissement commun (Mission 3) : pas de privilèges supplémentaires, toutes
+# les capacités retirées, système de fichiers racine en lecture seule, limites
+# de mémoire / processus / descripteurs. Docker applique en plus par défaut son
+# profil seccomp et le profil AppArmor « docker-default ».
+x-durcissement: &durcissement
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  pids_limit: 256
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 2048
 
 services:
   # Résolveur récursif depuis les racines, validation DNSSEC obligatoire,
@@ -13,6 +31,16 @@ services:
     image: tordns/unbound:local
     container_name: tordns-unbound
     restart: unless-stopped
+    <<: *durcissement
+    # Unbound démarre en root uniquement pour préparer l'ancre DNSSEC puis
+    # passer à l'utilisateur `unbound` : ces quatre capacités sont le strict
+    # minimum, tout le reste est retiré.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    mem_limit: 256m
     # Aucun port publié : depuis la Mission 2, Unbound n'est joignable que sur
     # le réseau docker interne `dns` (passerelle incluse), jamais depuis l'hôte.
     volumes:
@@ -38,9 +66,16 @@ services:
     image: tordns/passerelle:local
     container_name: tordns-passerelle
     restart: unless-stopped
+    <<: *durcissement
+    mem_limit: 128m
     environment:
       UNBOUND_ADDR: "unbound:5335"
       LISTEN_ADDR: ":8053"
+      # Limite globale (pas par IP : derrière Tor, tous les clients partagent
+      # l'adresse de sortie du démon Tor) et parallélisme borné.
+      LIMITE_REQ_S: "200"
+      LIMITE_RAFALE: "400"
+      MAX_CONCURRENTS: "64"
     networks:
       - dns
     depends_on:
@@ -48,7 +83,12 @@ services:
         condition: service_healthy
     logging:
       driver: "none"
-    read_only: true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8053/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # Front HTTP local. En Mission 2, Tor exposera ce service en .onion (HTTP en
   # clair à l'intérieur du circuit Tor, jamais sur l'hôte).
@@ -56,6 +96,13 @@ services:
     image: caddy:2-alpine
     container_name: tordns-caddy
     restart: unless-stopped
+    <<: *durcissement
+    # Le binaire Caddy de l'image porte la capacité de fichier
+    # CAP_NET_BIND_SERVICE ; sans elle dans l'ensemble de capacités, execve
+    # échoue dès que toutes les autres sont retirées.
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 128m
     # Aucun port publié : seul Tor (réseau `dns`) atteint Caddy. L'unique
     # point d'entrée distant est l'adresse .onion.
     volumes:
@@ -65,11 +112,21 @@ services:
       dns:
         # IP fixe : Tor exige une cible IP:port pour le service caché.
         ipv4_address: 172.28.53.20
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      # Caddy écrit sa configuration autosauvegardée dans /config.
+      - /config:size=8m,mode=0700
     depends_on:
       passerelle:
-        condition: service_started
+        condition: service_healthy
     logging:
       driver: "none"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   # Service caché Tor v3 : publie Caddy sur une adresse .onion et fournit le
   # SOCKS local utilisé pour la preuve. Les clés v3 vivent dans le volume
@@ -81,6 +138,8 @@ services:
     image: tordns/tor:local
     container_name: tordns-tor
     restart: unless-stopped
+    <<: *durcissement
+    mem_limit: 256m
     environment:
       TOR_SOCKS_PORT: "${TOR_SOCKS_PORT:-9050}"
     ports:
@@ -93,6 +152,12 @@ services:
     networks:
       - dns
       - sortie
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   # Réseau privé : Unbound, passerelle, Caddy et Tor. `internal: true`

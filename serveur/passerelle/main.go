@@ -19,7 +19,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -103,10 +105,29 @@ func main() {
 	adresseEcoute := env("LISTEN_ADDR", ":8053")
 
 	r := &resolveur{adresse: adresseUnbound, delai: 5 * time.Second}
+	limiteur := nouveauLimiteur(envNombre("LIMITE_REQ_S", 200), envNombre("LIMITE_RAFALE", 400))
+	concurrence := make(chan struct{}, int(envNombre("MAX_CONCURRENTS", 64)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dns-query", func(w http.ResponseWriter, req *http.Request) {
+		// Limite globale : derrière un service caché Tor, toutes les requêtes
+		// arrivent de la même IP (celle de Tor), une limite par IP serait donc
+		// inopérante ou injuste. On borne le débit total et le parallélisme.
+		if !limiteur.autoriser() {
+			rejetTemporaire(w)
+			return
+		}
+		select {
+		case concurrence <- struct{}{}:
+			defer func() { <-concurrence }()
+		default:
+			rejetTemporaire(w)
+			return
+		}
 		servirDoH(w, req, r)
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {
+		sonde(w, req, r)
 	})
 
 	serveur := &http.Server{
@@ -131,6 +152,73 @@ func env(cle, defaut string) string {
 		return v
 	}
 	return defaut
+}
+
+func envNombre(cle string, defaut float64) float64 {
+	v, err := strconv.ParseFloat(os.Getenv(cle), 64)
+	if err != nil || v < 1 {
+		return defaut
+	}
+	return v
+}
+
+// --- Limitation de débit (seau à jetons) ---
+
+type limiteurDebit struct {
+	mu      sync.Mutex
+	debit   float64 // jetons ajoutés par seconde
+	rafale  float64 // capacité maximale du seau
+	jetons  float64
+	instant time.Time
+}
+
+func nouveauLimiteur(debit, rafale float64) *limiteurDebit {
+	return &limiteurDebit{debit: debit, rafale: rafale, jetons: rafale, instant: time.Now()}
+}
+
+func (l *limiteurDebit) autoriser() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	maintenant := time.Now()
+	l.jetons += maintenant.Sub(l.instant).Seconds() * l.debit
+	if l.jetons > l.rafale {
+		l.jetons = l.rafale
+	}
+	l.instant = maintenant
+	if l.jetons < 1 {
+		return false
+	}
+	l.jetons--
+	return true
+}
+
+func rejetTemporaire(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	erreurHTTP(w, http.StatusTooManyRequests)
+}
+
+// sonde répond sans journaliser ni exposer de données client : elle effectue
+// une résolution fixe (example.com A) pour vérifier la chaîne Unbound + DNSSEC.
+func sonde(w http.ResponseWriter, req *http.Request, r *resolveur) {
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		erreurHTTP(w, http.StatusMethodNotAllowed)
+		return
+	}
+	message, err := messageRequete("example.com", 1)
+	if err != nil {
+		erreurHTTP(w, http.StatusServiceUnavailable)
+		return
+	}
+	reponse, err := r.Resoudre(message)
+	if err != nil || len(reponse) < 12 || reponse[3]&0x0F != 0 {
+		erreurHTTP(w, http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, "ok\n")
 }
 
 func servirDoH(w http.ResponseWriter, req *http.Request, r *resolveur) {
