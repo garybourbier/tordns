@@ -1,0 +1,224 @@
+# TorDNS — nœud installable (Mission 8).
+# Reprend la stack des missions 1 à 3 et 7 (Unbound, passerelle DoH, Caddy,
+# Tor) sans port publié sur l'hôte : le seul point d'entrée est le service
+# caché. Ajoute la page d'état publique et borne toutes les ressources pour
+# tenir sur un VPS à 1 Go.
+#
+# Ce fichier est lancé par l'installeur (`noeud/installer.sh`), qui écrit le
+# `.env` voisin (chemins, version, propriétaire du dossier Tor) et le `torrc`.
+# Les images Unbound, passerelle et client de test sont construites depuis le
+# dossier `serveur/` copié à côté sur le nœud.
+name: tordns-noeud
+
+x-durcissement: &durcissement
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  pids_limit: 128
+  ulimits:
+    nofile:
+      soft: 512
+      hard: 1024
+
+services:
+  # Récursion depuis les racines, DNSSEC obligatoire, zéro journal de requête.
+  unbound:
+    build:
+      context: ../serveur/unbound
+    image: tordns/unbound:local
+    container_name: tordns-noeud-unbound
+    restart: unless-stopped
+    <<: *durcissement
+    # Strict minimum pour préparer l'ancre DNSSEC puis passer à `unbound`.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    mem_limit: 192m
+    cpus: 0.50
+    volumes:
+      - unbound-lib:/var/lib/unbound
+    networks:
+      dns:
+        ipv4_address: 172.28.54.10
+      sortie: {}
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "dig", "@127.0.0.1", "-p", "5335", "cloudflare.com", "A", "+short", "+time=2", "+tries=1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Passerelle DoH (RFC 8484) : HTTP -> DNS filaire -> Unbound.
+  passerelle:
+    build:
+      context: ../serveur/passerelle
+    image: tordns/passerelle:local
+    container_name: tordns-noeud-passerelle
+    restart: unless-stopped
+    <<: *durcissement
+    mem_limit: 96m
+    cpus: 0.30
+    environment:
+      UNBOUND_ADDR: "unbound:5335"
+      LISTEN_ADDR: ":8053"
+      LIMITE_CIRCUIT_REQ_S: "${LIMITE_CIRCUIT_REQ_S:-20}"
+      LIMITE_CIRCUIT_RAFALE: "${LIMITE_CIRCUIT_RAFALE:-40}"
+      LIMITE_CIRCUITS_MAX: "${LIMITE_CIRCUITS_MAX:-4096}"
+      LIMITE_CIRCUIT_TTL: "${LIMITE_CIRCUIT_TTL:-120}"
+      LIMITE_REQ_S: "${LIMITE_REQ_S:-200}"
+      LIMITE_RAFALE: "${LIMITE_RAFALE:-400}"
+      MAX_CONCURRENTS: "${MAX_CONCURRENTS:-64}"
+    networks:
+      - dns
+    depends_on:
+      unbound:
+        condition: service_healthy
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8053/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Page d'état publique : version, état d'Unbound et de Tor, charge grossière.
+  # Aucun compteur de requêtes, aucune donnée par domaine ni par client.
+  etat:
+    build:
+      context: ./etat
+    image: tordns/etat:local
+    container_name: tordns-noeud-etat
+    restart: unless-stopped
+    <<: *durcissement
+    mem_limit: 32m
+    cpus: 0.10
+    # Même uid/gid que Tor : lecture seule du cookie de contrôle (0600) et du
+    # dossier du service caché, sans privilège supplémentaire.
+    user: "${TORDNS_TOR_UID:-100}:${TORDNS_TOR_GID:-101}"
+    environment:
+      TORDNS_VERSION: "${TORDNS_VERSION:-inconnue}"
+      UNBOUND_ADDR: "unbound:5335"
+      TORDNS_CONTROLE_TOR: "tor:9051"
+      TORDNS_COOKIE_TOR: "/tor/control_auth_cookie"
+    volumes:
+      - ${TORDNS_DONNEES:?chemin des données manquant}/tor:/tor:ro
+    networks:
+      - dns
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/.well-known/tordns/etat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Front HTTP interne, exposé uniquement par le service caché Tor.
+  caddy:
+    image: caddy:2-alpine
+    container_name: tordns-noeud-caddy
+    restart: unless-stopped
+    <<: *durcissement
+    # Le binaire Caddy de l'image porte une capacité de fichier ; sans elle
+    # dans l'ensemble, execve échoue quand toutes les autres sont retirées.
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 96m
+    cpus: 0.25
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      dns:
+        ipv4_address: 172.28.54.20
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /config:size=8m,mode=0700
+    depends_on:
+      passerelle:
+        condition: service_healthy
+      etat:
+        condition: service_started
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Service caché v3. SocksPort 0 : le nœud ne sert que de service caché.
+  # L'identité (clés v3) est générée par Tor lui-même dans
+  # ${TORDNS_DONNEES}/tor, jamais envoyée ailleurs.
+  tor:
+    build:
+      context: ./tor
+    image: tordns/noeud-tor:local
+    container_name: tordns-noeud-tor
+    restart: unless-stopped
+    <<: *durcissement
+    mem_limit: 224m
+    cpus: 0.50
+    # Installation normale (root) : uid/gid de l'utilisateur `tor` du
+    # conteneur. Test sans root : utilisateur appelant, via `.env`.
+    user: "${TORDNS_TOR_UID:-100}:${TORDNS_TOR_GID:-101}"
+    volumes:
+      - ${TORDNS_DONNEES:?chemin des données manquant}/torrc:/etc/tor/torrc:ro
+      - ${TORDNS_DONNEES:?chemin des données manquant}/tor:/var/lib/tor
+    networks:
+      - dns
+      - sortie
+    healthcheck:
+      # Le fichier hostname n'apparaît qu'une fois le service publié.
+      test: ["CMD", "test", "-f", "/var/lib/tor/hidden_service/hostname"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "none"
+
+  # Client Tor séparé, uniquement pour les preuves locales (profil `test`).
+  # Aucun port publié, aucun accès à l'hôte.
+  tor-client:
+    build:
+      context: ../serveur/tor-client
+    image: tordns/tor-client:test
+    container_name: tordns-noeud-tor-client
+    profiles: ["test"]
+    restart: "no"
+    <<: *durcissement
+    mem_limit: 128m
+    tmpfs:
+      - /var/lib/tor-client:size=16m,mode=0700,uid=100,gid=101
+    networks:
+      - dns
+      - sortie
+    logging:
+      driver: "none"
+
+networks:
+  # Réseau privé du nœud : aucune sortie Internet possible.
+  dns:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.54.0/24
+  # Sortie : Unbound (récursion), Tor (circuits) et le client de test.
+  sortie:
+    driver: bridge
+
+volumes:
+  unbound-lib:
+  caddy-data:

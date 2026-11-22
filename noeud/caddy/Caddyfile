@@ -1,0 +1,52 @@
+# TorDNS — front HTTP du nœud installable (Mission 8).
+# Joignable uniquement depuis le réseau docker privé, lui-même exposé
+# exclusivement par le service caché Tor.
+{
+	admin off
+	auto_https off
+
+	# Tor précède chaque connexion d'un en-tête PROXY v2 qui encode le
+	# circuit ; Caddy le lit et remplace l'adresse distante. Seul le réseau
+	# privé du nœud peut fournir cet en-tête.
+	servers {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 172.28.54.0/24
+				fallback_policy ignore
+			}
+		}
+	}
+}
+
+http://:8080 {
+	# Aucun journal d'accès : ni IP, ni URL, ni en-tête.
+	log {
+		output discard
+	}
+
+	handle /healthz {
+		reverse_proxy passerelle:8053
+	}
+
+	handle /dns-query {
+		reverse_proxy passerelle:8053 {
+			# Identifiant de circuit issu du PROXY v2, non falsifiable.
+			header_up X-TorDNS-Circuit {http.request.remote.host}
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up -X-Real-IP
+		}
+	}
+
+	# Page d'état publique : version, état des services, charge grossière.
+	# Le service `etat` ne lit aucun journal et ne compte aucune requête.
+	handle /.well-known/tordns/etat {
+		reverse_proxy etat:8081
+	}
+
+	handle {
+		respond "TorDNS — DoH uniquement sur /dns-query" 404
+	}
+}

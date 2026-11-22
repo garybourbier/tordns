@@ -107,6 +107,17 @@ Plusieurs nœuds derrière une adresse Onionbalance, admission automatique des b
 pool « communauté » séparé, mises à jour signées pour les nœuds et les clients. Détail et
 missions 7 à 13 : `docs/missions/00-lire-moi.md`.
 
+Un nœud complet s'installe sur un Debian 12/13 vierge en une commande :
+
+```bash
+sudo ./noeud/installer.sh
+```
+
+L'identité du service caché est générée par Tor dans `/var/lib/tordns` (0700),
+la page `/.well-known/tordns/etat` publie version, état des services et charge
+grossière sans aucun compteur, et la désinstallation conserve les clés par
+défaut. Voir `noeud/README.md`.
+
 ---
 
 ## 4. Règles de Sécurité et Bonnes Pratiques

@@ -38,3 +38,32 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : rien de bloqué. Pour une preuve sur matériel réel,
   demander à Gary un passage Windows 11 et un appareil Android (DNS privé
   activé puis désactivé) ; sinon la relecture Claude suffit.
+
+## Mission 8 — Nœud installable (22/11/2026)
+
+- **Fait** : `noeud/installer.sh` (POSIX sh, idempotent) vérifie Debian 12/13
+  et la RAM, installe Docker depuis les paquets Debian, crée l'utilisateur
+  système `tordns`, `/opt/tordns` et `/var/lib/tordns` (0700), génère le
+  `torrc`, laisse Tor créer l'identité du service caché, pose
+  `tordns.service` et affiche l'adresse d'instance (`tordns-adresse`).
+  `--maitresse` écrit `ob_config` et active
+  `HiddenServiceOnionbalanceInstance 1` (préparation mission 9), sans jamais
+  toucher aux clés, y compris quand on le retire. `desinstaller.sh` retire
+  service, conteneurs et code mais **conserve les clés** ; leur suppression
+  exige `--supprimer-cles` et la confirmation tapée « SUPPRIMER ». Page
+  publique `/.well-known/tordns/etat` (version, Unbound, Tor,
+  charge faible/moyenne/forte) sans aucun compteur. Stack bornée à 640 Mio de
+  mémoire et CPU plafonné, journaux Docker coupés. Preuve
+  `scripts/verifier-m08.sh` : installation réelle dans une racine jetable,
+  identité Tor réelle, DoH POST par le `.onion` (HTTP 200, ID conservé,
+  RCODE 0), page d'état lue par Tor, relance avec clé et adresse identiques,
+  préparation Onionbalance, désinstallation gardant les clés puis suppression
+  après confirmation.
+- **Reste** : l'installation des paquets Docker par `apt`, l'activation réelle
+  de systemd et une exécution dans un conteneur/VM Debian vierge n'ont pas pu
+  être faites ici (ni root ni Debian jetable) ; le bac à sable utilise le
+  Docker de la machine de développement. Onionbalance et les mises à jour sont
+  hors mission 8.
+- **Demandé à qui** : à Gary, un passage `sudo ./noeud/installer.sh` sur un
+  VPS Debian 12/13 vierge pour valider apt et systemd ; sinon la relecture
+  Claude des scripts suffit.
