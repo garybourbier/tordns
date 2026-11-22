@@ -67,3 +67,31 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, un passage `sudo ./noeud/installer.sh` sur un
   VPS Debian 12/13 vierge pour valider apt et systemd ; sinon la relecture
   Claude des scripts suffit.
+
+## Mission 9 — Redondance Onionbalance (22/11/2026)
+
+- **Fait** : contrôleur séparé (`controleur/`) avec Tor et onionbalance 0.2.4,
+  authentification au contrôle Tor par socket Unix, génération de
+  `maitresse.key`/`maitresse.onion` (0600/0700) et d'une config depuis un pool
+  texte. `noeud/installer.sh` accepte `--prefixe` et `--sous-reseau`, et
+  `noeud/docker-compose.yml` est paramétrable : trois nœuds complets
+  (`tordns-m09-1..3`) tournent sur la même machine, chacun avec son réseau et
+  son instance. Caddy autorise le CIDR complet par variable. Documentation
+  `docs/redondance.md` (schéma, ajout/retrait d'un nœud, pertes, sauvegarde
+  `age`, rotation de clé, plafond de 10 instances, PoW). Preuve
+  `scripts/verifier-m09.sh` : publication réelle de l'adresse maîtresse en
+  63–78 s, DoH par le `.onion` maître (10/10, ID conservé, RCODE 0), trois
+  instances à 3 points d'introduction chacune, descripteur maître à 6 points,
+  durée déclarée 180 min, PoW présente sur les instances et absente du maître,
+  arrêt d'un nœud (10/10 immédiatement, 10/10 après 300 s, 2 des 6 points
+  encore au descripteur), arrêt du contrôleur (10/10 encore servies).
+- **Reste** : les trois nœuds partagent un seul hôte, pas trois VPS distincts ;
+  la survie du descripteur au-delà des quelques minutes mesurées après la
+  perte du contrôleur n'a pas été attendue en entier (seule la durée déclarée
+  de 180 min est connue) ; la tenue au-delà de trois instances n'est pas
+  testée ; la restauration réelle d'une sauvegarde chiffrée n'a pas été
+  exécutée.
+- **Demandé à qui** : à Gary, trois VPS distincts (ou au moins deux) pour
+  mesurer la perte d'un site réel, et un test de restauration `age` sur une
+  machine hors ligne ; sinon la relecture Claude de `docs/redondance.md`
+  suffit.

@@ -15,6 +15,8 @@ SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RACINE=/
 UTILISATEUR=tordns
 MAITRESSE=
+PREFIXE=tordns-noeud
+SOUS_RESEAU=172.28.54
 SANS_DOCKER=0
 SANS_SYSTEMD=0
 SANS_ATTENTE=0
@@ -27,6 +29,10 @@ Usage : sudo ./$PROG [options]
                          écrit ob_config et active
                          HiddenServiceOnionbalanceInstance 1
   --utilisateur <nom>    utilisateur système propriétaire du nœud (tordns)
+  --prefixe <nom>        préfixe des conteneurs et nom du projet compose
+                         (tordns-noeud) ; utile pour plusieurs nœuds sur une
+                         même machine de test
+  --sous-reseau <a.b.c>  réseau privé du nœud, /24 (172.28.54)
   --racine <dossier>     préfixe d'installation, pour les tests (défaut : /)
   --sans-docker          ne pas installer Docker (déjà fourni par l'hôte)
   --sans-systemd         ne pas activer l'unité systemd (démarrage direct)
@@ -52,6 +58,16 @@ while [ $# -gt 0 ]; do
 	--utilisateur)
 		[ $# -ge 2 ] || die "--utilisateur exige un nom"
 		UTILISATEUR=$2
+		shift 2
+		;;
+	--prefixe)
+		[ $# -ge 2 ] || die "--prefixe exige un nom"
+		PREFIXE=$2
+		shift 2
+		;;
+	--sous-reseau)
+		[ $# -ge 2 ] || die "--sous-reseau exige une adresse a.b.c"
+		SOUS_RESEAU=$2
 		shift 2
 		;;
 	--racine)
@@ -89,6 +105,10 @@ BINAIRES=$(chemin /usr/local/bin)
 if [ "$RACINE" = / ] && [ "$(id -u)" -ne 0 ]; then
 	die "l'installation dans / exige root : relancez avec sudo"
 fi
+printf '%s' "$PREFIXE" | grep -Eq '^[a-z0-9][a-z0-9-]{0,40}$' ||
+	die "préfixe invalide (minuscules, chiffres et tirets attendus) : $PREFIXE"
+printf '%s' "$SOUS_RESEAU" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' ||
+	die "sous-réseau invalide (a.b.c attendu) : $SOUS_RESEAU"
 [ -f "$SOURCE/docker-compose.yml" ] || die "docker-compose.yml introuvable à côté de $PROG"
 [ -f "$SOURCE/../serveur/unbound/unbound.conf" ] || die "dossier serveur/ introuvable : lancez l'installeur depuis un clone du dépôt"
 [ -f "$SOURCE/VERSION" ] || die "fichier VERSION introuvable"
@@ -236,7 +256,7 @@ CookieAuthFileGroupReadable 1
 
 HiddenServiceDir /var/lib/tor/hidden_service
 HiddenServiceVersion 3
-HiddenServicePort 80 172.28.54.20:8080
+HiddenServicePort 80 __SOUS_RESEAU__.20:8080
 HiddenServiceExportCircuitID haproxy
 HiddenServicePoWDefensesEnabled 1
 HiddenServiceMaxStreams 64
@@ -255,7 +275,7 @@ EOF
 Log warn stdout
 SafeLogging 1
 EOF
-} >"$TORRC.tmp"
+} | sed "s/__SOUS_RESEAU__/$SOUS_RESEAU/g" >"$TORRC.tmp"
 mv "$TORRC.tmp" "$TORRC"
 chmod 0644 "$TORRC"
 
@@ -307,6 +327,9 @@ definir() {
 }
 definir TORDNS_DONNEES "$DONNEES"
 definir TORDNS_VERSION "$VERSION"
+definir TORDNS_PROJET "$PREFIXE"
+definir TORDNS_PREFIXE "$PREFIXE"
+definir TORDNS_SOUS_RESEAU "$SOUS_RESEAU"
 definir TORDNS_TOR_UID "$TOR_UID"
 definir TORDNS_TOR_GID "$TOR_GID"
 chmod 0600 "$ENV_FILE"

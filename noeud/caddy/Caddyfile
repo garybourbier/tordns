@@ -12,7 +12,8 @@
 		listener_wrappers {
 			proxy_protocol {
 				timeout 5s
-				allow 172.28.54.0/24
+				# CIDR privé du nœud (compose le passe dans TORDNS_RESEAU_CIDR).
+				allow {$TORDNS_RESEAU_CIDR}
 				fallback_policy ignore
 			}
 		}

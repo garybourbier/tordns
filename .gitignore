@@ -17,3 +17,7 @@ serveur/tor/hidden_service*/
 .env
 .env.*
 !.env.example
+
+# Pool et données du contrôleur Onionbalance (Mission 9)
+controleur/pools/*.txt
+!controleur/pools/coeur.txt.example

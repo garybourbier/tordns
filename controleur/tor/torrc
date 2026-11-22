@@ -1,0 +1,20 @@
+# TorDNS — torrc du contrôleur Onionbalance (Mission 9).
+# Client Tor uniquement : aucun service caché ici, la clé maîtresse est lue
+# par onionbalance. Le port de contrôle n'écoute que sur le réseau docker
+# privé du contrôleur et n'est jamais publié.
+
+ClientOnly 1
+SocksPort 0
+DataDirectory /var/lib/tor
+
+# Socket Unix, jamais exposé au réseau (stem n'accepte que des adresses IP
+# pour un port TCP). onionbalance tourne avec le même uid/gid que Tor et lit
+# le cookie par le dossier de données partagé.
+ControlPort 0
+ControlSocket /var/lib/tor/control_socket
+CookieAuthentication 1
+CookieAuthFile /var/lib/tor/control_auth_cookie
+CookieAuthFileGroupReadable 1
+
+Log warn stdout
+SafeLogging 1

@@ -8,7 +8,9 @@
 # `.env` voisin (chemins, version, propriétaire du dossier Tor) et le `torrc`.
 # Les images Unbound, passerelle et client de test sont construites depuis le
 # dossier `serveur/` copié à côté sur le nœud.
-name: tordns-noeud
+# Le préfixe et le sous-réseau sont paramétrables : la preuve de la mission 9
+# lance trois nœuds sur une même machine (trois projets, trois réseaux).
+name: ${TORDNS_PROJET:-tordns-noeud}
 
 x-durcissement: &durcissement
   cap_drop:
@@ -30,7 +32,7 @@ services:
     build:
       context: ../serveur/unbound
     image: tordns/unbound:local
-    container_name: tordns-noeud-unbound
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-unbound
     restart: unless-stopped
     <<: *durcissement
     # Strict minimum pour préparer l'ancre DNSSEC puis passer à `unbound`.
@@ -45,7 +47,7 @@ services:
       - unbound-lib:/var/lib/unbound
     networks:
       dns:
-        ipv4_address: 172.28.54.10
+        ipv4_address: ${TORDNS_SOUS_RESEAU:-172.28.54}.10
       sortie: {}
     logging:
       driver: "none"
@@ -61,7 +63,7 @@ services:
     build:
       context: ../serveur/passerelle
     image: tordns/passerelle:local
-    container_name: tordns-noeud-passerelle
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-passerelle
     restart: unless-stopped
     <<: *durcissement
     mem_limit: 96m
@@ -96,7 +98,7 @@ services:
     build:
       context: ./etat
     image: tordns/etat:local
-    container_name: tordns-noeud-etat
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-etat
     restart: unless-stopped
     <<: *durcissement
     mem_limit: 32m
@@ -125,7 +127,7 @@ services:
   # Front HTTP interne, exposé uniquement par le service caché Tor.
   caddy:
     image: caddy:2-alpine
-    container_name: tordns-noeud-caddy
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-caddy
     restart: unless-stopped
     <<: *durcissement
     # Le binaire Caddy de l'image porte une capacité de fichier ; sans elle
@@ -134,12 +136,17 @@ services:
       - NET_BIND_SERVICE
     mem_limit: 96m
     cpus: 0.25
+    environment:
+      # CIDR privé autorisé à fournir l'en-tête PROXY v2 (Caddyfile).
+      # Caddy n'accepte pas d'interpolation partielle dans un CIDR : on passe
+      # le préfixe complet, pas seulement les trois premiers octets.
+      TORDNS_RESEAU_CIDR: "${TORDNS_SOUS_RESEAU:-172.28.54}.0/24"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     networks:
       dns:
-        ipv4_address: 172.28.54.20
+        ipv4_address: ${TORDNS_SOUS_RESEAU:-172.28.54}.20
     tmpfs:
       - /tmp:size=16m,mode=1777
       - /config:size=8m,mode=0700
@@ -164,7 +171,7 @@ services:
     build:
       context: ./tor
     image: tordns/noeud-tor:local
-    container_name: tordns-noeud-tor
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-tor
     restart: unless-stopped
     <<: *durcissement
     mem_limit: 224m
@@ -194,7 +201,7 @@ services:
     build:
       context: ../serveur/tor-client
     image: tordns/tor-client:test
-    container_name: tordns-noeud-tor-client
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-tor-client
     profiles: ["test"]
     restart: "no"
     <<: *durcissement
@@ -214,7 +221,7 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: 172.28.54.0/24
+        - subnet: ${TORDNS_SOUS_RESEAU:-172.28.54}.0/24
   # Sortie : Unbound (récursion), Tor (circuits) et le client de test.
   sortie:
     driver: bridge

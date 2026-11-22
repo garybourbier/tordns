@@ -1,0 +1,12 @@
+# TorDNS — pool « cœur » des instances Onionbalance (Mission 9).
+#
+# Copier ce fichier en controleur/pools/coeur.txt (ignoré par git) et y mettre
+# une adresse .onion d'instance par ligne, tel que `tordns-adresse` l'affiche
+# sur chaque nœud. Les lignes vides et les commentaires sont ignorés.
+#
+# Les adresses ci-dessous sont fictives (une lettre répétée) : ne jamais
+# versionner de vraie adresse .onion.
+#
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion
+# bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.onion
+# cccccccccccccccccccccccccccccccccccccccccccccccccccccccc.onion

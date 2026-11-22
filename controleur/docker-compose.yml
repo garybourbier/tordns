@@ -1,0 +1,91 @@
+# TorDNS — contrôleur Onionbalance (Mission 9).
+#
+# À faire tourner sur un hôte qui n'est PAS un nœud : il détient la clé
+# maîtresse et publie le descripteur qui agrège les points d'introduction des
+# instances listées dans le pool. Aucun port publié : le seul accès est le
+# service caché maître lui-même.
+#
+# Lancé par controleur/scripts/demarrer.sh, qui écrit le pool et le
+# `config.yaml` à partir de `pools/coeur.txt`, puis passe son `.env`.
+name: tordns-controleur
+
+x-durcissement: &durcissement
+  restart: unless-stopped
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  pids_limit: 128
+  ulimits:
+    nofile:
+      soft: 512
+      hard: 1024
+  logging:
+    driver: "none"
+
+services:
+  # Tor de publication : son port de contrôle sert à onionbalance pour lire
+  # les descripteurs d'instances et téléverser le descripteur maître.
+  tor:
+    build:
+      context: ./tor
+    image: tordns/controleur-tor:local
+    container_name: tordns-controleur-tor
+    <<: *durcissement
+    mem_limit: 192m
+    cpus: 0.50
+    user: "${TORDNS_CONTROLEUR_UID:-100}:${TORDNS_CONTROLEUR_GID:-101}"
+    volumes:
+      # Le dossier Tor est un sous-dossier : la clé maîtresse reste à côté,
+      # hors du répertoire de travail de Tor.
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/tor:/var/lib/tor
+      - ./tor/torrc:/etc/tor/torrc:ro
+    networks:
+      - controleur
+    healthcheck:
+      # Le socket de contrôle n'existe qu'une fois Tor démarré.
+      test: ["CMD", "test", "-S", "/var/lib/tor/control_socket"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Onionbalance v3 : lit la clé maîtresse et le config.yaml générés dans le
+  # dossier de données, jamais versionnés.
+  onionbalance:
+    build:
+      context: ./onionbalance
+    image: tordns/onionbalance:local
+    container_name: tordns-controleur-onionbalance
+    <<: *durcissement
+    mem_limit: 160m
+    cpus: 0.30
+    user: "${TORDNS_CONTROLEUR_UID:-100}:${TORDNS_CONTROLEUR_GID:-101}"
+    command:
+      - -v
+      - info
+      - -c
+      - /donnees/config.yaml
+      - -s
+      - /var/lib/tor/control_socket
+    environment:
+      HOME: /tmp
+      ONIONBALANCE_LOG_LEVEL: info
+    volumes:
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}:/donnees:ro
+      # Le cookie de contrôle est annoncé par Tor avec son chemin absolu : il
+      # doit exister au même endroit ici pour que stem l'authentifie.
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/tor:/var/lib/tor:ro
+    depends_on:
+      tor:
+        condition: service_healthy
+    networks:
+      - controleur
+
+networks:
+  # Réseau privé : Tor et onionbalance seulement, aucun port publié.
+  controleur:
+    driver: bridge
