@@ -95,3 +95,30 @@ Une entrée par mission : fait, reste, demandé à qui.
   mesurer la perte d'un site réel, et un test de restauration `age` sur une
   machine hors ligne ; sinon la relecture Claude de `docs/redondance.md`
   suffit.
+
+## Mission 11 — Mises à jour signées (22/11/2026)
+
+- **Fait** : bibliothèque `outils/manifeste` (signature Ed25519 sur les octets
+  exacts, expiration, taille/SHA-256, images obligatoirement
+  `nom@sha256:…`, refus de rejeu, rotation par `cle_suivante`) et outil
+  `outils/publier` (`cle`, `manifeste`, `verifier`, hors ligne, stdlib seule).
+  `noeud/maj` applique un manifeste récupéré par Tor : tirage Docker par
+  empreinte via un override compose, sonde de santé, retour automatique aux
+  images précédentes si elle échoue. `client-linux/cmd/maj` fait de même pour
+  le binaire, remplacement atomique puis retour arrière si le service ne
+  redémarre pas. Units `tordns-maj.service`/`.timer` (6 h, décalage aléatoire
+  de 30 min) et équivalent client, miroir `/maj/` servi par Caddy depuis
+  `/var/lib/tordns/maj`, client Tor dédié dont le SOCKS n'écoute que sur la
+  boucle locale, installeur et désinstalleur mis à jour, documentation de
+  publication et de rotation. Preuve `scripts/verifier-m11.sh` : tests Go des
+  quatre modules, v2 appliquée au nœud et au client, rejeu v1 refusé, manifeste
+  altéré refusé, image par étiquette refusée, image cassée → v1 rétablie, service
+  client en échec → binaire précédent rétabli.
+- **Reste** : le transport Tor réel, un vrai registre Docker (tirage par
+  empreinte non exécuté contre un registre), un redémarrage systemd réel, la
+  construction de `tordns-maj` par l'installeur sur un Debian vierge, et une
+  rotation de clé sur un parc réel n'ont pas été prouvés ; les tests utilisent
+  HTTP local, un docker et un systemctl factices.
+- **Demandé à qui** : à Gary, un registre d'images (GHCR) avec des empreintes
+  réelles et un VPS Debian pour l'installation complète ; sinon la relecture
+  Claude du format et des refus suffit.

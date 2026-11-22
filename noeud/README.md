@@ -108,14 +108,40 @@ sont coupés sur les cinq services (`driver: none`).
 - `tor/` — image Tor minimale ; le `torrc` est généré par l'installeur.
 - `caddy/Caddyfile` — `/dns-query`, `/healthz`, page d'état.
 - `etat/` — service Go de la page d'état, sans dépendance, avec tests.
+- `maj/` — `tordns-maj`, vérification et application des mises à jour signées.
+- `tordns-maj.timer` — vérification toutes les 6 h, à décalage aléatoire.
 - `VERSION` — version affichée par la page d'état.
+
+## Mises à jour signées (Mission 11)
+
+Le nœud sert le miroir `/maj/` (dernier manifeste, signature et fichiers) et
+vérifie toutes les 6 h un manifeste signé Ed25519. Une mise à jour n'est
+appliquée que si la signature est valide, si la version est strictement
+supérieure, si le manifeste n'est pas expiré et si chaque image est désignée
+par `nom@sha256:…`. Les images sont tirées par empreinte ; une étiquette est
+refusée. Après relance, la sonde `/healthz` doit répondre : sinon les images
+précédentes sont réappliquées et la version n'est pas enregistrée.
+
+```bash
+sudo ./noeud/installer.sh --maitresse <adresse> --cle-maj <clé publique hex>
+systemctl list-timers tordns-maj.timer
+journalctl -u tordns-maj.service -n 50   # version, empreintes, erreurs seulement
+```
+
+L'installeur construit `tordns-maj` dans une image `golang:1.23-alpine` puis
+l'installe dans `/usr/local/bin`. Le SOCKS du client Tor de mise à jour n'écoute
+que sur `127.0.0.1:19050`. La clé privée de publication ne doit jamais être
+copiée sur un nœud ; voir `outils/publier/README.md` pour publier et faire
+tourner la clé.
 
 ## Limites
 
 - Testé localement (Docker de la machine de développement) ; l'installation
   des paquets Docker et l'activation systemd réelles demandent un Debian
   vierge, non disponible ici (voir le message de commit de la mission).
-- Le nœud ne participe pas encore à Onionbalance : c'est la mission 9, qui
-  utilisera `--maitresse`. Aucune mise à jour automatique (mission 11).
+- Onionbalance est préparé par `--maitresse` (mission 9) ; le nœud ne publie
+  pas lui-même l'adresse maîtresse.
+- La mise à jour par Tor, un vrai registre Docker et un redémarrage systemd
+  réel ne sont pas prouvés localement (voir `scripts/verifier-m11.sh`).
 - Le port de contrôle Tor est sans mot de passe mais en cookie, accessible
   uniquement depuis le réseau docker interne ; aucun port n'est publié.

@@ -1,0 +1,13 @@
+[Unit]
+Description=TorDNS — vérifie les mises à jour signées toutes les 6 h
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+# Décalage aléatoire : évite que tous les nœuds interrogent le miroir ensemble.
+RandomizedDelaySec=30min
+Persistent=true
+Unit=tordns-maj.service
+
+[Install]
+WantedBy=timers.target

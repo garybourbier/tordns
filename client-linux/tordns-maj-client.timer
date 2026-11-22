@@ -1,0 +1,12 @@
+[Unit]
+Description=TorDNS — vérifie les mises à jour du client toutes les 6 h
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+RandomizedDelaySec=30min
+Persistent=true
+Unit=tordns-maj-client.service
+
+[Install]
+WantedBy=timers.target

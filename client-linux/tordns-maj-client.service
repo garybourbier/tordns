@@ -1,0 +1,16 @@
+[Unit]
+Description=TorDNS — mise à jour signée du client Linux (par Tor)
+Documentation=file:/usr/share/doc/tordns/README.md
+After=network-online.target tor.service
+Wants=network-online.target
+Requires=tor.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/tordns/maj-client.env
+ExecStart=/usr/local/bin/tordns-client-maj
+TimeoutStartSec=10min
+# Le binaire remplacé vit dans /usr/local/bin : l'unité de mise à jour doit
+# pouvoir y écrire. Elle ne touche à rien d'autre.
+ReadWritePaths=/usr/local/bin
+NoNewPrivileges=yes

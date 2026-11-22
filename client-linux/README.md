@@ -154,6 +154,35 @@ diagnostic sur fixtures, 10 000 paquets hostiles).
   connexion morte, saturation au-delà de `-concurrence` (requête abandonnée
   plutôt qu'accumulée).
 
+## Mise à jour signée (Mission 11)
+
+`tordns-client-maj` applique le même manifeste signé que les nœuds : signature
+Ed25519 épinglée, version strictement supérieure, expiration, taille et
+SHA-256 de la cible `client-linux-amd64`. Le binaire est écrit à côté puis
+renommé (atomique) ; si `systemctl restart tordns-client` ou le contrôle
+`is-active` échoue, le binaire précédent est remis en place et redémarré.
+
+```bash
+cd client-linux
+go build -ldflags "-X tordns/manifeste.ClePubliqueEpinglee=<clé hex>" \
+    -o tordns-client ./..
+go build -ldflags "-X tordns/manifeste.ClePubliqueEpinglee=<clé hex>" \
+    -o tordns-client-maj ./cmd/maj
+sudo install -m 0755 tordns-client-maj /usr/local/bin/
+sudo install -m 0644 tordns-maj-client.service tordns-maj-client.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now tordns-maj-client.timer
+```
+
+`/etc/tordns/maj-client.env` :
+
+```sh
+TORDNS_MAJ_MANIFESTE=http://<adresse>.onion/maj/manifeste.json
+TORDNS_MAJ_SIGNATURE=http://<adresse>.onion/maj/manifeste.json.sig
+TORDNS_MAJ_SOCKS=127.0.0.1:9050
+TORDNS_MAJ_ETAT=/var/lib/tordns/maj-client.json
+TORDNS_MAJ_BINAIRE=/usr/local/bin/tordns-client
+```
+
 ## Limites
 
 - Le relais **ne valide pas DNSSEC lui-même** : il relaie le bit `AD` calculé

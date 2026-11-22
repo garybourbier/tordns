@@ -60,7 +60,9 @@ CODE=$(chemin /opt/tordns)
 DONNEES=$(chemin /var/lib/tordns)
 UNITES=$(chemin /etc/systemd/system)
 BINAIRES=$(chemin /usr/local/bin)
+ETCDIR=$(chemin /etc/tordns)
 ENV_FILE="$CODE/.env"
+MAJ_ENV="$ETCDIR/maj.env"
 
 if [ "$RACINE" = / ] && [ "$(id -u)" -ne 0 ]; then
 	die "la désinstallation depuis / exige root : relancez avec sudo"
@@ -77,6 +79,9 @@ if [ "$SANS_SYSTEMD" -eq 0 ] && [ "$RACINE" = / ]; then
 	if systemctl list-unit-files tordns.service >/dev/null 2>&1; then
 		systemctl disable --now tordns.service 2>/dev/null || true
 	fi
+	if systemctl list-unit-files tordns-maj.timer >/dev/null 2>&1; then
+		systemctl disable --now tordns-maj.timer tordns-maj.service 2>/dev/null || true
+	fi
 fi
 
 if [ -d "$CODE/noeud" ]; then
@@ -92,7 +97,7 @@ if [ -d "$CODE/noeud" ]; then
 		# shellcheck disable=SC2086
 		# --profile test : le client Tor de test, s'il tourne, tient aussi aux
 		# réseaux du nœud et doit être retiré.
-		(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" --profile test down --remove-orphans) ||
+		(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" --profile test --profile maj down --remove-orphans) ||
 			printf 'AVERTISSEMENT : la stack ne s’est pas arrêtée proprement.\n'
 		for image in tordns/noeud-tor:local tordns/etat:local; do
 			"$DOCKER_BIN" image rm "$image" >/dev/null 2>&1 || true
@@ -107,12 +112,13 @@ fi
 # 2. Fichiers du programme
 # ---------------------------------------------------------------------------
 info "Suppression du code et de l'unité"
-rm -f "$UNITES/tordns.service"
+rm -f "$UNITES/tordns.service" "$UNITES/tordns-maj.service" "$UNITES/tordns-maj.timer"
 if [ "$RACINE" = / ] && [ "$SANS_SYSTEMD" -eq 0 ]; then
 	systemctl daemon-reload 2>/dev/null || true
 fi
-rm -f "$BINAIRES/tordns-adresse"
+rm -f "$BINAIRES/tordns-adresse" "$BINAIRES/tordns-maj"
 rm -rf "$CODE"
+rm -f "$MAJ_ENV"
 ok "code, unité et commande tordns-adresse supprimés"
 
 # ---------------------------------------------------------------------------

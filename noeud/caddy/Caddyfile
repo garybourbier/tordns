@@ -47,6 +47,17 @@ http://:8080 {
 		reverse_proxy etat:8081
 	}
 
+	# Miroir des mises à jour signées : le dernier manifeste et les fichiers
+	# publiés, déposés par Gary dans /var/lib/tordns/maj. Aucun listage de
+	# dossier ; les clients vérifient de toute façon signature et empreinte.
+	handle_path /maj/* {
+		root * /srv/maj
+		file_server {
+			browse false
+		}
+		header Cache-Control "no-store"
+	}
+
 	handle {
 		respond "TorDNS — DoH uniquement sur /dns-query" 404
 	}

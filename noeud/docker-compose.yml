@@ -144,6 +144,8 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+      # Dernier manifeste signé et fichiers publiés (mission 11).
+      - ${TORDNS_DONNEES:?chemin des données manquant}/maj:/srv/maj:ro
     networks:
       dns:
         ipv4_address: ${TORDNS_SOUS_RESEAU:-172.28.54}.20
@@ -192,6 +194,28 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "none"
+
+  # Client Tor réservé à la mise à jour signée (mission 11) : le service
+  # tordns-maj l'utilise pour récupérer le manifeste par Tor. SOCKS publié sur
+  # la boucle locale seulement, jamais sur une interface publique ; le profil
+  # `maj` évite de le démarrer en permanence.
+  maj-tor:
+    build:
+      context: ../serveur/tor-client
+    image: tordns/tor-client:test
+    container_name: ${TORDNS_PREFIXE:-tordns-noeud}-maj-tor
+    profiles: ["maj"]
+    restart: "no"
+    <<: *durcissement
+    mem_limit: 128m
+    tmpfs:
+      - /var/lib/tor-client:size=16m,mode=0700,uid=100,gid=101
+    ports:
+      - 127.0.0.1:${TORDNS_MAJ_SOCKS_PORT:-19050}:9050
+    networks:
+      - sortie
     logging:
       driver: "none"
 

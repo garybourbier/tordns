@@ -20,6 +20,8 @@ SOUS_RESEAU=172.28.54
 SANS_DOCKER=0
 SANS_SYSTEMD=0
 SANS_ATTENTE=0
+SANS_MAJ=0
+CLE_MAJ=
 
 usage() {
 	cat <<EOF
@@ -37,6 +39,9 @@ Usage : sudo ./$PROG [options]
   --sans-docker          ne pas installer Docker (déjà fourni par l'hôte)
   --sans-systemd         ne pas activer l'unité systemd (démarrage direct)
   --sans-attente         ne pas attendre la publication du service caché
+  --sans-maj             ne pas construire tordns-maj (hors ligne, tests)
+  --cle-maj <hex>        clé publique Ed25519 de publication compilée dans
+                         tordns-maj (32 octets en hexadécimal)
   -h, --help             cette aide
 
 Relancer le script est sans danger : le code est mis à jour, les clés et
@@ -78,6 +83,12 @@ while [ $# -gt 0 ]; do
 	--sans-docker) SANS_DOCKER=1; shift ;;
 	--sans-systemd) SANS_SYSTEMD=1; shift ;;
 	--sans-attente) SANS_ATTENTE=1; shift ;;
+	--sans-maj) SANS_MAJ=1; shift ;;
+	--cle-maj)
+		[ $# -ge 2 ] || die "--cle-maj exige une clé hexadécimale"
+		CLE_MAJ=$2
+		shift 2
+		;;
 	-h | --help) usage; exit 0 ;;
 	*) die "option inconnue : $1 (voir --help)" ;;
 	esac
@@ -188,8 +199,10 @@ else
 	die "utilisateur $UTILISATEUR absent et création impossible sans root"
 fi
 
-mkdir -p "$CODE" "$DONNEES/tor"
+mkdir -p "$CODE" "$DONNEES/tor" "$DONNEES/maj"
 chmod 0700 "$DONNEES"
+# Miroir public /maj/ : lisible par Caddy, jamais modifiable par lui.
+chmod 0755 "$DONNEES/maj"
 
 # Propriétaire du dossier Tor : en installation normale, l'utilisateur `tor`
 # du conteneur (uid 100, gid 101) ; sans root (tests), l'utilisateur appelant.
@@ -220,9 +233,11 @@ mkdir -p "$TMP_CODE/serveur"
 for dossier in unbound passerelle tor-client; do
 	cp -a "$SOURCE/../serveur/$dossier" "$TMP_CODE/serveur/$dossier"
 done
-rm -rf "$CODE/noeud" "$CODE/serveur"
+cp -a "$SOURCE/../outils" "$TMP_CODE/outils"
+rm -rf "$CODE/noeud" "$CODE/serveur" "$CODE/outils"
 mv "$TMP_CODE/noeud" "$CODE/noeud"
 mv "$TMP_CODE/serveur" "$CODE/serveur"
+mv "$TMP_CODE/outils" "$CODE/outils"
 rmdir "$TMP_CODE"
 VERSION=$(tr -d ' \n\r\t' <"$CODE/noeud/VERSION")
 ok "code installé dans $CODE (version $VERSION)"
@@ -364,6 +379,94 @@ EOF
 chmod 0644 "$UNIT"
 ok "$UNIT"
 
+# ---------------------------------------------------------------------------
+# 8. Mise à jour signée : binaire tordns-maj, configuration, timer
+# ---------------------------------------------------------------------------
+info "Mise à jour signée"
+ETCDIR=$(chemin /etc/tordns)
+mkdir -p "$ETCDIR"
+MAJ_ENV="$ETCDIR/maj.env"
+SOCKS_MAJ=19050
+
+if [ ! -f "$MAJ_ENV" ]; then
+	{
+		printf '# TorDNS — mise à jour signée du nœud (Mission 11).\n'
+		printf 'TORDNS_MAJ_SOCKS=127.0.0.1:%s\n' "$SOCKS_MAJ"
+		printf 'TORDNS_MAJ_SOCKS_PORT=%s\n' "$SOCKS_MAJ"
+		printf 'TORDNS_MAJ_ETAT=%s\n' "$DONNEES/maj-etat.json"
+		printf 'TORDNS_MAJ_COMPOSE=%s\n' "$CODE/noeud"
+		printf 'TORDNS_MAJ_ENV=%s\n' "$ENV_FILE"
+		printf 'TORDNS_MAJ_MANIFESTE=\nTORDNS_MAJ_SIGNATURE=\nTORDNS_MAJ_SANTE=\n'
+	} >"$MAJ_ENV"
+	chmod 0600 "$MAJ_ENV"
+fi
+
+definir_maj() {
+	cle=$1
+	valeur=$2
+	tmp="$MAJ_ENV.tmp"
+	awk -v c="$cle" -v v="$valeur" '
+		BEGIN { fait = 0 }
+		index($0, c "=") == 1 { print c "=" v; fait = 1; next }
+		{ print }
+		END { if (!fait) print c "=" v }
+	' "$MAJ_ENV" >"$tmp"
+	mv "$tmp" "$MAJ_ENV"
+}
+if [ -n "$MAITRESSE" ]; then
+	definir_maj TORDNS_MAJ_MANIFESTE "http://$MAITRESSE/maj/manifeste.json"
+	definir_maj TORDNS_MAJ_SIGNATURE "http://$MAITRESSE/maj/manifeste.json.sig"
+	definir_maj TORDNS_MAJ_SANTE "http://$MAITRESSE/healthz"
+fi
+chmod 0600 "$MAJ_ENV"
+chown "$UTILISATEUR" "$MAJ_ENV" 2>/dev/null || true
+ok "$MAJ_ENV"
+
+MAJ_UNIT="$UNITES/tordns-maj.service"
+cat >"$MAJ_UNIT" <<EOF
+[Unit]
+Description=TorDNS — mise à jour signée du nœud (par Tor)
+Documentation=file:$CODE/noeud/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=$CODE/noeud
+EnvironmentFile=-$MAJ_ENV
+ExecStartPre=$COMPOSE --env-file $ENV_FILE --profile maj up -d maj-tor
+ExecStart=$BINAIRES/tordns-maj
+ExecStopPost=$COMPOSE --env-file $ENV_FILE --profile maj stop maj-tor
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+EOF
+chmod 0644 "$MAJ_UNIT"
+cp "$CODE/noeud/tordns-maj.timer" "$UNITES/tordns-maj.timer"
+chmod 0644 "$UNITES/tordns-maj.timer"
+ok "$MAJ_UNIT et timer"
+
+MAJ_BUILT=0
+if [ "$SANS_MAJ" -eq 1 ] || [ "$RACINE" != / ]; then
+	ok "tordns-maj non construit (--sans-maj ou installation de test)"
+else
+	printf '%s' "$CLE_MAJ" | grep -Eq '^([0-9a-f]{64})$' ||
+		printf 'AVERTISSEMENT : --cle-maj absente ou invalide ; les mises à jour seront refusées tant que la clé de Gary ne sera pas compilée.\n'
+	JOURNAL_MAJ="$DONNEES/maj-construction.log"
+	if docker run --rm -e CGO_ENABLED=0 -v "$CODE":/src -w /src/noeud/maj \
+		golang:1.23-alpine go build -trimpath \
+		-ldflags "-s -w -X tordns/manifeste.ClePubliqueEpinglee=$CLE_MAJ" \
+		-o /src/tordns-maj . >"$JOURNAL_MAJ" 2>&1; then
+		install -m 0755 "$CODE/tordns-maj" "$BINAIRES/tordns-maj"
+		rm -f "$CODE/tordns-maj" "$JOURNAL_MAJ"
+		MAJ_BUILT=1
+		ok "tordns-maj installé dans $BINAIRES"
+	else
+		tail -n 5 "$JOURNAL_MAJ" >&2 || true
+		printf 'AVERTISSEMENT : construction de tordns-maj impossible ; mises à jour désactivées.\n'
+	fi
+fi
+
 construire() {
 	# Reconstruit les images à partir du code copié : une mise à jour du dépôt
 	# doit changer le comportement du nœud, pas seulement ses conteneurs.
@@ -385,6 +488,12 @@ else
 	systemctl daemon-reload
 	systemctl enable --now tordns.service
 	ok "tordns.service activé"
+	if [ "$MAJ_BUILT" -eq 1 ] && grep -q '^TORDNS_MAJ_MANIFESTE=..*' "$MAJ_ENV"; then
+		systemctl enable --now tordns-maj.timer
+		ok "tordns-maj.timer activé (toutes les 6 h)"
+	else
+		ok "timer de mise à jour non activé (clé ou URL de manifeste absente)"
+	fi
 fi
 
 # ---------------------------------------------------------------------------
