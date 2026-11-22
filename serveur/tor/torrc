@@ -1,11 +1,19 @@
-# TorDNS — client Tor local (Mission 1).
-# Aucun service caché ici : la Mission 2 ajoutera HiddenServiceDir/Port avec des
-# clés générées hors dépôt (serveur/tor/keys/, ignoré par git).
+# TorDNS — nœud Tor du serveur (Mission 2).
+# Client + service caché v3 : aucune fonction de relais.
 ClientOnly 1
-# Écoute uniquement dans le conteneur (aucun port publié en Mission 1).
-SocksPort 127.0.0.1:9050
+SocksPort 0.0.0.0:9050
 DataDirectory /var/lib/tor
 
-# Journal minimal : avertissements uniquement, jamais le contenu des requêtes.
+# Service caché v3 exposant le front Caddy sur le réseau docker interne.
+# Les clés sont générées par Tor dans /var/lib/tor/hidden_service (volume
+# `tor-data`, hors dépôt) avec les permissions 0700 imposées par Tor.
+HiddenServiceDir /var/lib/tor/hidden_service
+HiddenServiceVersion 3
+# Cible numérique obligatoire : IP fixe de Caddy sur le réseau `dns`.
+HiddenServicePort 80 172.28.53.20:8080
+
+# Aucune résolution DNS système : Tor résout les noms des services internes via
+# le DNS docker, et les sorties .onion ne passent jamais par Unbound.
+# Journal minimal : avertissements uniquement, jamais de contenu de requête.
 Log warn stdout
 SafeLogging 1

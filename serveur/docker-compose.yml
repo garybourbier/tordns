@@ -13,14 +13,14 @@ services:
     image: tordns/unbound:local
     container_name: tordns-unbound
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5335:5335/udp"
-      - "127.0.0.1:5335:5335/tcp"
+    # Aucun port publié : depuis la Mission 2, Unbound n'est joignable que sur
+    # le réseau docker interne `dns` (passerelle incluse), jamais depuis l'hôte.
     volumes:
       - unbound-lib:/var/lib/unbound
     networks:
       dns:
         ipv4_address: 172.28.53.10
+      sortie: {}
     logging:
       driver: "none"
     healthcheck:
@@ -56,42 +56,60 @@ services:
     image: caddy:2-alpine
     container_name: tordns-caddy
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:8080"
+    # Aucun port publié : seul Tor (réseau `dns`) atteint Caddy. L'unique
+    # point d'entrée distant est l'adresse .onion.
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     networks:
-      - dns
+      dns:
+        # IP fixe : Tor exige une cible IP:port pour le service caché.
+        ipv4_address: 172.28.53.20
     depends_on:
       passerelle:
         condition: service_started
     logging:
       driver: "none"
 
-  # Client Tor (SOCKS5 local). Aucun service caché pour l'instant : la Mission 2
-  # ajoutera les clés v3 HORS dépôt (serveur/tor/keys/ est ignoré par git).
+  # Service caché Tor v3 : publie Caddy sur une adresse .onion et fournit le
+  # SOCKS local utilisé pour la preuve. Les clés v3 vivent dans le volume
+  # `tor-data`, hors dépôt ; `scripts/gestion-cles.sh` en fait une copie de
+  # sauvegarde dans serveur/tor/keys/ (ignoré par git).
   tor:
     build:
       context: ./tor
     image: tordns/tor:local
     container_name: tordns-tor
     restart: unless-stopped
-    # Pas de port publié en Mission 1 : le SOCKS 9050 de l'hôte est déjà pris
-    # par le Tor du système. La Mission 2 définira le port dédié au circuit .onion.
+    environment:
+      TOR_SOCKS_PORT: "${TOR_SOCKS_PORT:-9050}"
+    ports:
+      # SOCKS uniquement sur loopback : c'est le point d'entrée des tests
+      # locaux. Le port 9050 est configurable car il peut être déjà pris par
+      # le Tor du système (voir serveur/.env.example).
+      - "127.0.0.1:${TOR_SOCKS_PORT:-9050}:9050"
     volumes:
       - tor-data:/var/lib/tor
     networks:
       - dns
+      - sortie
 
 networks:
+  # Réseau privé : Unbound, passerelle, Caddy et Tor. `internal: true`
+  # interdit toute sortie vers Internet depuis ce réseau.
   dns:
     driver: bridge
+    internal: true
     ipam:
       config:
         - subnet: 172.28.53.0/24
+  # Réseau de sortie : uniquement Unbound (récursion) et Tor (circuits).
+  sortie:
+    driver: bridge
 
 volumes:
   unbound-lib:
   caddy-data:
+  # Contient DataDirectory + clés du service caché v3. Jamais monté dans le
+  # dépôt ; sauvegarde explicite via scripts/gestion-cles.sh.
   tor-data:

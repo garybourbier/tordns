@@ -1,6 +1,7 @@
 # Secrets et clés — jamais versionnés (règle absolue du projet)
 
 # Clés et configuration du service caché Tor v3 (Mission 2)
+serveur/cles-onion/
 serveur/tor/keys/
 serveur/tor/hidden_service*/
 **/hs_ed25519_secret_key
