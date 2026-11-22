@@ -115,12 +115,26 @@ L'activité de diagnostic se déclare `showWhenLocked` : sans cela, Android gèl
 le processus derrière l'écran de verrouillage et le bootstrap ne progresse
 jamais. Aucun nom de domaine n'est journalisé, seul le code de réponse.
 
-**Non vérifié ici** : l'activation effective du tunnel. L'appareil de test est
-verrouillé par code et la boîte de consentement VPN exige une action de
-l'utilisateur ; le service n'est pas exporté et `prepare()` ne peut pas être
-contourné sans ce consentement. La capture TUN est couverte par les tests de
-paquets et le chemin Tor par le diagnostic ci-dessus, mais pas par un ping réel
-à travers le VPN.
+**5. Capture DNS réelle à travers le VPN.** Après déverrouillage de l'appareil
+et activation depuis l'écran (le consentement VPN est obligatoire), le réseau
+VPN est `tun0` avec `10.111.222.1` comme résolveur :
+
+```text
+VpnTransportInfo{type=1, sessionId=TorDNS, bypassable=false}
+tun0  LinkAddresses: [10.111.222.2/32]  DnsAddresses: [10.111.222.1]
+D NetdEventListenerService: DNS Requested by 1074, 2000(com.android.shell), SUCCESS, 4ms
+
+$ adb shell ping -c 1 example.com
+PING example.com (104.20.23.154) 64 bytes ... time=177 ms
+$ adb shell ping -c 1 wikipedia.org   # 185.15.58.224, 345 ms
+$ adb shell ping -c 1 debian.org      # 151.101.2.132, 238 ms
+
+Requêtes : 73   cache : 23   erreurs : 0   entrées : 14
+```
+
+Les trois noms sont résolus par TorDNS (compteur en hausse, cache alimenté,
+zéro erreur), puis les paquets ICMP sortent normalement par le réseau physique
+(seul le DNS est routé vers le TUN). Le VPN a été désactivé après le test.
 
 ## Sécurité et limites
 
@@ -140,6 +154,11 @@ paquets et le chemin Tor par le diagnostic ci-dessus, mais pas par un ping réel
 - **Arm64 uniquement** dans ce build ; `minSdk 26`. Une compilation x86_64 pour
   émulateur se fait en changeant la cible dans `scripts/construire.sh`.
 - La notification de service permanent utilise le type `specialUse` (Android 14).
+- Les requêtes DNS de type `ANY` reçoivent `NOTIMP` du serveur (Mission 3) : les
+  applications qui n'essaient que ce type voient un délai d'attente, comme dans
+  les journaux Android (`TIMEOUT`) observés pour deux applications.
+- Le fichier natif est aligné sur 16 Kio (`max-page-size=16384`), exigence
+  d'Android 16 pour les pages de 16 Kio.
 - Le point d'entrée de diagnostic (`--ez diagnostic true`) est inactif hors APK
   débogable ; il ne sert qu'aux preuves locales sur appareil.
 - Arti met 20 à 90 s à démarrer au premier lancement ; les requêtes reçues
