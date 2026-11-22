@@ -1,0 +1,38 @@
+[Unit]
+Description=TorDNS — relais DNS local vers le service caché Tor
+Documentation=file:/usr/share/doc/tordns/README.md
+After=network-online.target tor.service
+Wants=network-online.target
+# Tor local écoute sur 127.0.0.1:9050 ; sans lui le relais ne peut rien résoudre.
+Requires=tor.service
+
+[Service]
+Type=simple
+User=tordns
+Group=tordns
+EnvironmentFile=/etc/tordns/client.env
+ExecStart=/usr/local/bin/tordns-client
+Restart=on-failure
+RestartSec=3s
+
+# Seul privilège nécessaire : écouter sur le port 53.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# Surface d'attaque réduite : aucune écriture hors /tmp privé.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
