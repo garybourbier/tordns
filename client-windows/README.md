@@ -74,6 +74,15 @@ Le script exécute `cargo test`, compile pour `x86_64-pc-windows-gnu`, copie
 officielle de WireGuard/WinTun et placez-la dans `dist/` (ou à côté de l'exe,
 ou dans `System32`).
 
+L'installateur peut aussi être compilé avec le `makensis.exe` officiel lancé
+sous Wine :
+
+```bash
+WINEDEBUG=-all wine /chemin/vers/nsis-3.10/makensis.exe /V3 tordns.nsi
+```
+
+(à exécuter depuis `installateur/`, après avoir garni `dist/`).
+
 ## Installation sur Windows
 
 1. Copier `tordns-client.exe` et `wintun.dll` dans `C:\Program Files\TorDNS\`.
@@ -134,12 +143,30 @@ erreur : wintun.dll introuvable (placez-la à côté de l'exécutable ou dans Sy
 Le dernier message est le comportement attendu sans pilote : le binaire démarre,
 résout les symboles WinTun à l'exécution et échoue proprement.
 
+Installateur compilé avec NSIS 3.10 (`makensis.exe` sous Wine), incluant
+`wintun.dll` 0.14.1 amd64 : `TorDNS-0.1.0-setup.exe`, 684 325 octets. Test
+silencieux sous Wine :
+
+```text
+$ wine TorDNS-0.1.0-setup.exe /S        # code 0
+$ ls "C:\Program Files\TorDNS"
+desinstaller.exe  tordns-client.exe  wintun.dll
+$ cat "C:\ProgramData\TorDNS\client.conf"
+onion =
+socks = 127.0.0.1:9050
+...
+$ wine "C:\Program Files\TorDNS\tordns-client.exe" --version
+tordns-client 0.1.0
+$ wine "C:\Program Files\TorDNS\desinstaller.exe" /S
+# dossier d'installation supprimé, client.conf conservé (adresse .onion)
+```
+
 ## Non vérifié ici, et pourquoi
 
 - **Exécution réelle du service et de l'adaptateur WinTun** : nécessite Windows,
-  les droits admin et le pilote signé. Wine ne charge pas WinTun.
-- **Installateur NSIS** : `makensis` n'est pas installé sur cette machine ; le
-  script est fourni mais n'a pas été compilé.
+  les droits admin et le pilote signé. Wine ne charge pas WinTun et n'exécute
+  pas le gestionnaire de services ; les commandes `sc create` de l'installateur
+  n'ont donc pas pu être validées.
 - **Signature Authenticode** : aucun certificat disponible.
 
 ## Limites connues
