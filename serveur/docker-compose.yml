@@ -1,0 +1,97 @@
+# TorDNS — stack serveur locale (Mission 1)
+# Aucune de ces images ne publie autre chose que 127.0.0.1 sur l'hôte.
+# Aucun journal de requêtes : ni Unbound, ni la passerelle, ni Caddy n'écrivent
+# le détail des questions DNS (voir serveur/README.md).
+name: tordns
+
+services:
+  # Résolveur récursif depuis les racines, validation DNSSEC obligatoire,
+  # aucun forward, aucune journalisation des requêtes.
+  unbound:
+    build:
+      context: ./unbound
+    image: tordns/unbound:local
+    container_name: tordns-unbound
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5335:5335/udp"
+      - "127.0.0.1:5335:5335/tcp"
+    volumes:
+      - unbound-lib:/var/lib/unbound
+    networks:
+      dns:
+        ipv4_address: 172.28.53.10
+    logging:
+      driver: "none"
+    healthcheck:
+      test: ["CMD", "dig", "@127.0.0.1", "-p", "5335", "cloudflare.com", "A", "+short", "+time=2", "+tries=1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Passerelle DoH (RFC 8484) : HTTP -> DNS filaire -> Unbound.
+  # Non publiée sur l'hôte : seul Caddy (et, en Mission 2, Tor) peut l'atteindre.
+  passerelle:
+    build:
+      context: ./passerelle
+    image: tordns/passerelle:local
+    container_name: tordns-passerelle
+    restart: unless-stopped
+    environment:
+      UNBOUND_ADDR: "unbound:5335"
+      LISTEN_ADDR: ":8053"
+    networks:
+      - dns
+    depends_on:
+      unbound:
+        condition: service_healthy
+    logging:
+      driver: "none"
+    read_only: true
+
+  # Front HTTP local. En Mission 2, Tor exposera ce service en .onion (HTTP en
+  # clair à l'intérieur du circuit Tor, jamais sur l'hôte).
+  caddy:
+    image: caddy:2-alpine
+    container_name: tordns-caddy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      - dns
+    depends_on:
+      passerelle:
+        condition: service_started
+    logging:
+      driver: "none"
+
+  # Client Tor (SOCKS5 local). Aucun service caché pour l'instant : la Mission 2
+  # ajoutera les clés v3 HORS dépôt (serveur/tor/keys/ est ignoré par git).
+  tor:
+    build:
+      context: ./tor
+    image: tordns/tor:local
+    container_name: tordns-tor
+    restart: unless-stopped
+    # Pas de port publié en Mission 1 : le SOCKS 9050 de l'hôte est déjà pris
+    # par le Tor du système. La Mission 2 définira le port dédié au circuit .onion.
+    volumes:
+      - tor-data:/var/lib/tor
+    networks:
+      - dns
+
+networks:
+  dns:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.53.0/24
+
+volumes:
+  unbound-lib:
+  caddy-data:
+  tor-data:

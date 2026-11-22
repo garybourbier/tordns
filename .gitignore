@@ -1,0 +1,18 @@
+# Secrets et clés — jamais versionnés (règle absolue du projet)
+
+# Clés et configuration du service caché Tor v3 (Mission 2)
+serveur/tor/keys/
+serveur/tor/hidden_service*/
+**/hs_ed25519_secret_key
+**/hs_ed25519_public_key
+**/hostname
+
+# Adresses .onion de production : jamais dans le dépôt
+*.onion
+
+# Clés, certificats et variables d'environnement locales
+*.key
+*.pem
+.env
+.env.*
+!.env.example

@@ -1,0 +1,29 @@
+# TorDNS — front HTTP interne.
+# En Mission 2, ce service sera exposé exclusivement en service caché Tor v3 :
+# le trafic est déjà chiffré et authentifié par Tor, donc HTTP en clair ici.
+{
+	admin off
+	auto_https off
+}
+
+http://:8080 {
+	# Aucun journal d'accès : sortie explicitement jetée. Caddy n'écrit donc
+	# ni IP, ni URL, ni en-tête de requête.
+	log {
+		output discard
+	}
+
+	handle /dns-query {
+		reverse_proxy passerelle:8053 {
+			# Ne transmettre aucune métadonnée client inutile.
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up -X-Real-IP
+		}
+	}
+
+	handle {
+		respond "TorDNS — DoH uniquement sur /dns-query" 404
+	}
+}

@@ -1,0 +1,11 @@
+# TorDNS — client Tor local (Mission 1).
+# Aucun service caché ici : la Mission 2 ajoutera HiddenServiceDir/Port avec des
+# clés générées hors dépôt (serveur/tor/keys/, ignoré par git).
+ClientOnly 1
+# Écoute uniquement dans le conteneur (aucun port publié en Mission 1).
+SocksPort 127.0.0.1:9050
+DataDirectory /var/lib/tor
+
+# Journal minimal : avertissements uniquement, jamais le contenu des requêtes.
+Log warn stdout
+SafeLogging 1
