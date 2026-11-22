@@ -1,0 +1,20 @@
+[package]
+name = "tordns-windows"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+publish = false
+description = "Client Windows TorDNS : relais DNS local vers le service caché Tor"
+
+[lib]
+name = "tordns_win"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tordns-client"
+path = "src/main.rs"
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
