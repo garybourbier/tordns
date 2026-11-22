@@ -9,5 +9,6 @@ javac --release 11 -Xlint:all -Werror -d "$SORTIE" \
     "$RACINE/app/src/main/java/org/tordns/client/DnsMessage.java" \
     "$RACINE/app/src/main/java/org/tordns/client/DnsCache.java" \
     "$RACINE/app/src/main/java/org/tordns/client/Paquet.java" \
+    "$RACINE/app/src/main/java/org/tordns/client/Diagnostic.java" \
     "$RACINE/tests/TestLocal.java"
 java -cp "$SORTIE" org.tordns.client.TestLocal

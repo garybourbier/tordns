@@ -172,8 +172,10 @@ func analyser(msg []byte) (question, error) {
 
 // cacheable indique si la réponse peut être mise en cache et pour combien de
 // temps : réponses complètes (non tronquées), standard, NOERROR ou NXDOMAIN.
-// Le TTL retenu est le plus petit TTL des enregistrements, OPT exclu ; une
-// réponse vide (NODATA) est gardée brièvement.
+// Pour une réponse positive, seul le plus petit TTL de la section réponse
+// compte. Pour NXDOMAIN ou NODATA, le TTL négatif suit le SOA (RFC 2308) :
+// minimum du TTL du SOA et de son champ MINIMUM. Plancher d'une seconde,
+// plafond ttlMax ; sans SOA, une réponse négative n'est pas gardée.
 func cacheable(msg []byte, ttlMax time.Duration) (time.Duration, bool) {
 	if len(msg) < 12 {
 		return 0, false
@@ -188,7 +190,8 @@ func cacheable(msg []byte, ttlMax time.Duration) (time.Duration, bool) {
 	if (flags>>11)&0xF != 0 { // opcode non standard
 		return 0, false
 	}
-	if rcode := flags & 0xF; rcode != 0 && rcode != 3 {
+	rcode := flags & 0xF
+	if rcode != 0 && rcode != 3 {
 		return 0, false
 	}
 
@@ -202,46 +205,102 @@ func cacheable(msg []byte, ttlMax time.Duration) (time.Duration, bool) {
 		off += 4
 	}
 
+	an := int(binary.BigEndian.Uint16(msg[6:8]))
+	ns := int(binary.BigEndian.Uint16(msg[8:10]))
 	plusPetit := uint32(0)
 	trouve := false
-	sections := []int{
-		int(binary.BigEndian.Uint16(msg[6:8])),
-		int(binary.BigEndian.Uint16(msg[8:10])),
-		int(binary.BigEndian.Uint16(msg[10:12])),
+
+	// Réponse positive : la section réponse fait foi, pas l'autorité.
+	for i := 0; i < an; i++ {
+		var typ uint16
+		var ttl uint32
+		var err error
+		off, typ, ttl, err = lireRR(msg, off)
+		if err != nil {
+			return 0, false
+		}
+		if typ != typeOPT && (!trouve || ttl < plusPetit) {
+			plusPetit = ttl
+			trouve = true
+		}
 	}
-	for _, n := range sections {
-		for i := 0; i < n; i++ {
-			_, apresNom, err := lireNom(msg, off)
-			if err != nil || apresNom+10 > len(msg) {
+	if rcode == 0 && an > 0 {
+		if !trouve {
+			return 0, false
+		}
+		d := bornerTTL(plusPetit, ttlMax)
+		return d, d > 0
+	}
+
+	// NXDOMAIN ou NODATA : TTL négatif porté par le SOA de l'autorité.
+	negatif := uint32(0)
+	if ns > 0 {
+		for i := 0; i < ns; i++ {
+			debutDonnees := 0
+			var typ uint16
+			var ttl uint32
+			var err error
+			off, typ, ttl, debutDonnees, err = lireRRDonnees(msg, off)
+			if err != nil {
 				return 0, false
 			}
-			typ := binary.BigEndian.Uint16(msg[apresNom : apresNom+2])
-			ttl := binary.BigEndian.Uint32(msg[apresNom+4 : apresNom+8])
-			rdlen := int(binary.BigEndian.Uint16(msg[apresNom+8 : apresNom+10]))
-			off = apresNom + 10 + rdlen
-			if off > len(msg) {
-				return 0, false
-			}
-			if typ == typeOPT {
+			if typ != 6 || debutDonnees+4 > len(msg) {
 				continue
 			}
-			if !trouve || ttl < plusPetit {
-				plusPetit = ttl
+			// Les quatre derniers octets des données du SOA sont MINIMUM.
+			minimum := binary.BigEndian.Uint32(msg[off-4 : off])
+			valeur := ttl
+			if minimum < valeur {
+				valeur = minimum
+			}
+			if !trouve || valeur < negatif {
+				negatif = valeur
 				trouve = true
 			}
 		}
 	}
 	if !trouve {
-		return 30 * time.Second, true
+		return 0, false
 	}
-	d := time.Duration(plusPetit) * time.Second
+	d := bornerTTL(negatif, ttlMax)
+	return d, d > 0
+}
+
+func bornerTTL(secondes uint32, ttlMax time.Duration) time.Duration {
+	if secondes == 0 {
+		return 0
+	}
+	d := time.Duration(secondes) * time.Second
 	if d < time.Second {
 		d = time.Second
 	}
 	if d > ttlMax {
 		d = ttlMax
 	}
-	return d, true
+	return d
+}
+
+// lireRR avance après un enregistrement et renvoie son type et son TTL.
+func lireRR(msg []byte, off int) (int, uint16, uint32, error) {
+	fin, typ, ttl, _, err := lireRRDonnees(msg, off)
+	return fin, typ, ttl, err
+}
+
+// lireRRDonnees renvoie aussi le début des données de l'enregistrement.
+func lireRRDonnees(msg []byte, off int) (int, uint16, uint32, int, error) {
+	_, apresNom, err := lireNom(msg, off)
+	if err != nil || apresNom+10 > len(msg) {
+		return 0, 0, 0, 0, errForme
+	}
+	typ := binary.BigEndian.Uint16(msg[apresNom : apresNom+2])
+	ttl := binary.BigEndian.Uint32(msg[apresNom+4 : apresNom+8])
+	rdlen := int(binary.BigEndian.Uint16(msg[apresNom+8 : apresNom+10]))
+	debut := apresNom + 10
+	fin := debut + rdlen
+	if fin > len(msg) {
+		return 0, 0, 0, 0, errForme
+	}
+	return fin, typ, ttl, debut, nil
 }
 
 // ajuster renvoie une copie de la réponse avec l'identifiant du client et des

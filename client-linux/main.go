@@ -30,6 +30,8 @@ type config struct {
 	ttlMax      time.Duration
 	delai       time.Duration
 	concurrence int
+	diagnostic  bool
+	racine      string
 }
 
 type relais struct {
@@ -70,6 +72,8 @@ func chargerConfig() config {
 	ttlMax := flag.Int("ttl-max", 3600, "durée maximale de mise en cache, en secondes")
 	delai := flag.Duration("delai", 10*time.Second, "délai maximal par requête DoH")
 	flag.IntVar(&cfg.concurrence, "concurrence", 64, "requêtes simultanées au maximum")
+	flag.BoolVar(&cfg.diagnostic, "diagnostic", false, "inspecte les fuites DNS et quitte sans démarrer le relais")
+	flag.StringVar(&cfg.racine, "racine", "/", "racine d'inspection du diagnostic (tests)")
 	flag.Parse()
 	cfg.ttlMax = time.Duration(*ttlMax) * time.Second
 	cfg.delai = *delai
@@ -202,6 +206,13 @@ func main() {
 	log.SetFlags(log.LstdFlags)
 	log.SetPrefix("tordns-client ")
 	cfg := chargerConfig()
+	if cfg.diagnostic {
+		constats := diagnosticer(cfg.racine)
+		if afficherDiagnostic(constats) > 0 {
+			os.Exit(1)
+		}
+		return
+	}
 	if cfg.onion == "" {
 		log.Fatal("adresse .onion requise : renseigner TORDNS_ONION ou -onion")
 	}

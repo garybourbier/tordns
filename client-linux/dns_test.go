@@ -148,3 +148,74 @@ func TestServfailReprendLaQuestion(t *testing.T) {
 		t.Fatal("identifiant ou question perdus")
 	}
 }
+
+func ajouterRR(msg []byte, typ uint16, ttl uint32, donnees []byte) []byte {
+	msg = append(msg, 0xC0, 12) // pointeur vers le nom de la question
+	msg = binary.BigEndian.AppendUint16(msg, typ)
+	msg = append(msg, 0, 1) // classe IN
+	msg = binary.BigEndian.AppendUint32(msg, ttl)
+	msg = binary.BigEndian.AppendUint16(msg, uint16(len(donnees)))
+	return append(msg, donnees...)
+}
+
+func donneesSOA(minimum uint32) []byte {
+	out := []byte{0, 0, 0, 0} // mname et rname : pointeurs vers la racine
+	for i := 0; i < 4; i++ {  // serial, refresh, retry, expire
+		out = binary.BigEndian.AppendUint32(out, 3600)
+	}
+	return binary.BigEndian.AppendUint32(out, minimum)
+}
+
+func reponseNegative(id uint16, rcode uint16, avecSOA bool) []byte {
+	msg := requeteTest(id, "absent.example", 1, false)
+	binary.BigEndian.PutUint16(msg[2:4], 0x8180|rcode)
+	if avecSOA {
+		binary.BigEndian.PutUint16(msg[8:10], 1) // une autorité
+		msg = ajouterRR(msg, 6, 600, donneesSOA(60))
+	}
+	return msg
+}
+
+func TestCacheableReponsePositiveIgnoreAutorite(t *testing.T) {
+	msg := reponseTest(1, 300, 0x8180)
+	binary.BigEndian.PutUint16(msg[8:10], 1)
+	msg = ajouterRR(msg, 6, 30, donneesSOA(10))
+	ttl, ok := cacheable(msg, time.Hour)
+	if !ok || ttl != 300*time.Second {
+		t.Fatalf("le TTL de l'autorité ne doit pas compter : ttl=%v ok=%v", ttl, ok)
+	}
+}
+
+func TestCacheableNegatifSuitLeSOA(t *testing.T) {
+	ttl, ok := cacheable(reponseNegative(1, 3, true), time.Hour)
+	if !ok || ttl != 60*time.Second {
+		t.Fatalf("NXDOMAIN : ttl=%v ok=%v, attendu 60 s (minimum du SOA)", ttl, ok)
+	}
+	// NODATA : NOERROR sans réponse, même règle.
+	ttl, ok = cacheable(reponseNegative(1, 0, true), time.Hour)
+	if !ok || ttl != 60*time.Second {
+		t.Fatalf("NODATA : ttl=%v ok=%v, attendu 60 s", ttl, ok)
+	}
+	if _, ok := cacheable(reponseNegative(1, 3, false), time.Hour); ok {
+		t.Fatal("un NXDOMAIN sans SOA ne doit pas être caché")
+	}
+}
+
+func TestCacheableBornes(t *testing.T) {
+	msg := reponseNegative(1, 3, true)
+	// TTL 0 : jamais de mise en cache, même avec un SOA.
+	soa := len(msg) - len(donneesSOA(60)) - 10
+	binary.BigEndian.PutUint32(msg[soa+4:soa+8], 0)
+	binary.BigEndian.PutUint32(msg[len(msg)-4:], 0)
+	if ttl, ok := cacheable(msg, time.Hour); ok {
+		t.Fatalf("TTL nul : ttl=%v ok=%v, attendu non caché", ttl, ok)
+	}
+	// Plafond de 1 h.
+	long := reponseNegative(1, 3, true)
+	soa = len(long) - len(donneesSOA(60)) - 10
+	binary.BigEndian.PutUint32(long[soa+4:soa+8], 7200)
+	binary.BigEndian.PutUint32(long[len(long)-4:], 7200)
+	if ttl, ok := cacheable(long, time.Hour); !ok || ttl != time.Hour {
+		t.Fatalf("plafond : ttl=%v ok=%v, attendu 1 h", ttl, ok)
+	}
+}

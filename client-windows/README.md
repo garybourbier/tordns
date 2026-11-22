@@ -26,7 +26,8 @@ C'est le même modèle que le client Linux de la Mission 4.
 
 | Fichier | Rôle |
 |---|---|
-| `src/main.rs` | service, mode console, `--verifier-config`, aide |
+| `src/main.rs` | service, mode console, `--verifier-config`, `--diagnostic`, aide |
+| `src/diagnostic.rs` | fuites IPv4/IPv6, DoH Windows/navigateur, SMHNR |
 | `src/service.rs` | enregistrement SCM, arrêt propre |
 | `src/wintun.rs` | chargement dynamique de `wintun.dll`, configuration netsh, boucle DNS |
 | `src/resolveur.rs` | cache puis DoH, statistiques |
@@ -58,6 +59,19 @@ delai = 15
   registre).
 - Au premier démarrage, `netsh` affecte `10.111.222.2/32` à l'adaptateur,
   `10.111.222.1` comme DNS et ajoute la route `10.111.222.1/32`.
+
+## Diagnostic des fuites
+
+```bat
+tordns-client --diagnostic
+```
+
+Sous Windows, la commande lit `netsh interface ipv4/ipv6 show dnsservers`,
+`netsh dns show encryption`, `EnableAutoDoh`, les politiques DoH Chrome/Edge et
+`DisableSmartNameResolution`. Elle signale chaque résolveur hors `127.0.0.1`,
+le DoH système ou navigateur actif, et le « Smart Multi-Homed Name
+Resolution ». Chaque constat indique le réglage à fermer ; code de sortie 1
+s'il reste une fuite. Aucun domaine n'est consulté ni journalisé.
 
 ## Construction (depuis Linux)
 
@@ -115,14 +129,16 @@ Environnement Linux, sans Windows ni pilote WinTun :
 
 ```text
 $ cargo test
-test result: ok. 18 passed; 0 failed
+test result: ok. 27 passed; 0 failed
 ```
 
-Couvre : nom/clé DNS, bit DO, compression, TTL 300 → 298 → plancher 1 s,
-SERVFAIL, cache LRU/expiration/TTL nul, extraction et réinjection IPv4/UDP avec
-sommes IP **et** UDP valides, configuration (erreurs, doublons, booléens), et un
-échange DoH complet contre un faux proxy SOCKS5 local (poignée de main, CONNECT
-ATYP 3, POST `/dns-query`, `Content-Length`).
+Couvre : nom/clé DNS, bit DO, compression, TTL 300 → 298, TTL positif ignorant
+l'autorité, NXDOMAIN/NODATA par le SOA, TTL nul non caché, SERVFAIL, cache
+LRU/expiration, extraction et réinjection IPv4/UDP avec sommes IP **et** UDP
+valides, configuration (erreurs, doublons, booléens), diagnostic sur sorties
+`netsh`/registre simulées, 10 000 paquets hostiles, et un échange DoH complet
+contre un faux proxy SOCKS5 local (poignée de main, CONNECT ATYP 3, POST
+`/dns-query`, `Content-Length`).
 
 Cross-compilation et exécution sous Wine :
 
@@ -163,10 +179,11 @@ $ wine "C:\Program Files\TorDNS\desinstaller.exe" /S
 
 ## Non vérifié ici, et pourquoi
 
-- **Exécution réelle du service et de l'adaptateur WinTun** : nécessite Windows,
-  les droits admin et le pilote signé. Wine ne charge pas WinTun et n'exécute
-  pas le gestionnaire de services ; les commandes `sc create` de l'installateur
-  n'ont donc pas pu être validées.
+- **Exécution réelle du service, de l'adaptateur WinTun et du diagnostic
+  `netsh`/registre** : nécessite Windows, les droits admin et le pilote signé.
+  Wine ne charge pas WinTun et n'exécute pas le gestionnaire de services ; les
+  commandes `sc create` et le diagnostic réel n'ont donc pas pu être validés
+  (seule l'analyse de sorties simulées est prouvée).
 - **Signature Authenticode** : aucun certificat disponible.
 
 ## Limites connues

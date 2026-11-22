@@ -22,7 +22,8 @@ Arti (Rust) ── circuits Tor ──► <adresse>.onion:80 ──► Caddy →
 | `app/.../TorVpnService.java` | tunnel TUN, lecture des paquets, notification, arrêt |
 | `app/.../Paquet.java` | analyse IPv4/UDP et construction de la réponse (sommes comprises) |
 | `app/.../DnsMessage.java` | noms compressés, clé de cache, bit DO, TTL, SERVFAIL |
-| `app/.../DnsCache.java` | LRU borné, expiration, TTL décrémentés |
+| `app/.../DnsCache.java` | LRU borné, expiration, TTL décrémentés, TTL négatif du SOA |
+| `app/.../Diagnostic.java` | détection du DNS privé Android (DoT) hors VpnService |
 | `app/.../Resolveur.java` | bootstrap unique, pool DoH, statistiques |
 | `app/.../Arti.java` | déclarations JNI |
 | `rust/src/lib.rs` | `demarrer` / `doh` / `arreter`, POST HTTP/1.1 via `TorClient::connect` |
@@ -55,9 +56,12 @@ jamais versionnée ; aucun secret ni adresse `.onion` ne figure dans le dépôt.
      (8.8.8.8, 1.1.1.1, 9.9.9.9, OpenDNS…). Les requêtes DNS envoyées en dur y
      sont détournées ; les autres flux vers ces adresses (DoH, etc.) sont coupés.
 3. « Activer la protection », accepter la demande VPN d'Android.
-4. « Résoudre via Tor » teste le chemin complet (même sans VPN) et affiche le
+4. Le bandeau de diagnostic lit le réglage « DNS privé » : s'il est en mode
+   automatique ou strict, Android envoie du DoT hors du VpnService ; l'écran
+   indique la fuite et demande de le passer sur « Désactivé ».
+5. « Résoudre via Tor » teste le chemin complet (même sans VPN) et affiche le
    code de réponse, le nombre d'enregistrements et la durée.
-5. Les compteurs (requêtes, cache, erreurs) sont visibles en bas de l'écran.
+6. Les compteurs (requêtes, cache, erreurs) sont visibles en bas de l'écran.
 
 L'application elle-même est **exclue du VPN** (`addDisallowedApplication`) :
 Arti doit joindre le réseau Tor avec le résolveur système, sinon le bootstrap
@@ -79,13 +83,14 @@ cargo run --release --example doh -- <adresse>.onion example.com
 **2. Briques DNS/cache/paquets** (`./scripts/tester.sh`) :
 
 ```
-OK : 21 vérifications locales passées
+OK : 33 vérifications locales passées (dont 10 000 paquets hostiles)
 ```
 
 Couvre : nom normalisé et clé (`example.com|1|1|plain`), bit DO de l'OPT,
 extraction IPv4/UDP (ports, charge utile), échange d'adresses/ports et sommes
-IP/UDP valides, réécriture d'identifiant, TTL 300 → 298 après 2 s, LRU borné,
-SERVFAIL bien formé.
+IP/UDP valides, réécriture d'identifiant, TTL 300 → 298 après 2 s, TTL positif
+ignorant l'autorité, NXDOMAIN/NODATA par le SOA, TTL nul non caché, LRU borné,
+SERVFAIL bien formé, diagnostic du DNS privé, et 10 000 paquets hostiles.
 
 **3. APK et chargement JNI sur appareil** :
 
@@ -143,14 +148,15 @@ zéro erreur), puis les paquets ICMP sortent normalement par le réseau physique
   `files/arti-etat` et le cache de répertoires dans `cache/arti-cache`.
 - **Aucune résolution locale** : tout passe par le circuit Tor d'Arti ; aucune
   requête DNS en clair vers l'extérieur.
-- **Cache volatil** : 512 entrées, TTL plafonné à 1 h, non partagé, effacé à la
-  mort du processus.
+- **Cache volatil** : 512 entrées, expiration au TTL de la réponse (SOA pour
+  NXDOMAIN/NODATA), plafond 1 h, non partagé, effacé à la mort du processus.
 - **UDP seulement** : les requêtes DNS sur TCP (TCP/53) et les paquets IPv6 ne
   sont pas traités. Un client qui force TCP échoue et retombe généralement sur
   UDP. C'est le principal écart avec la Phase 4.
 - **Anti-fuite partiel** : les applications qui font leur propre DoH/DoT vers un
   domaine (et non vers une IP connue) ne sont pas interceptées ; seul un VPN
-  complet avec NAT le permettrait.
+  complet avec NAT le permettrait. Le DNS privé Android est détecté et signalé,
+  pas désactivé à la place de l'utilisateur.
 - **Arm64 uniquement** dans ce build ; `minSdk 26`. Une compilation x86_64 pour
   émulateur se fait en changeant la cible dans `scripts/construire.sh`.
 - La notification de service permanent utilise le type `specialUse` (Android 14).

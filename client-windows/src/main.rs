@@ -2,7 +2,8 @@
 //!
 //! Sans argument, le binaire s'enregistre auprès du gestionnaire de services.
 //! `--console` exécute le relais au premier plan (débogage), `--verifier-config`
-//! contrôle un fichier sans toucher au réseau, `--aide` affiche l'usage.
+//! contrôle un fichier sans toucher au réseau, `--diagnostic` liste les fuites
+//! DNS, `--aide` affiche l'usage.
 
 use std::path::PathBuf;
 
@@ -16,6 +17,7 @@ Usage :\n\
   tordns-client                         démarre en tant que service Windows\n\
   tordns-client --console [fichier]     relais au premier plan\n\
   tordns-client --verifier-config <f>   valide la configuration sans réseau\n\
+  tordns-client --diagnostic            inspecte les fuites DNS et quitte\n\
   tordns-client --aide | --version\n\
 \n\
 Configuration par défaut : %ProgramData%\\TorDNS\\client.conf\n\
@@ -38,6 +40,12 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("--aide") | Some("--help") | Some("-h") => aide(),
         Some("--version") | Some("-V") => println!("tordns-client {}", tordns_win::VERSION),
+        Some("--diagnostic") => {
+            let constats = tordns_win::diagnostic::executer();
+            if tordns_win::diagnostic::afficher(&constats) > 0 {
+                std::process::exit(1);
+            }
+        }
         Some("--verifier-config") => {
             let Some(chemin) = args.get(1) else {
                 eprintln!("erreur : chemin de configuration attendu");

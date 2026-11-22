@@ -128,8 +128,10 @@ final class DnsMessage {
 
     static byte[] avecId(byte[] reponse, int id) {
         byte[] copie = reponse.clone();
-        copie[0] = (byte) (id >> 8);
-        copie[1] = (byte) id;
+        if (copie.length >= 2) {
+            copie[0] = (byte) (id >> 8);
+            copie[1] = (byte) id;
+        }
         return copie;
     }
 
@@ -141,13 +143,17 @@ final class DnsMessage {
         return m.length > 2 && (m[2] & 0x02) != 0;
     }
 
-    /** Seules les réponses complètes NOERROR sans réponse tronquée sont cachées. */
+    /** NOERROR et NXDOMAIN non tronquées : le TTL décide ensuite. */
     static boolean cacheable(byte[] m) {
-        return m.length >= 12 && rcode(m) == 0 && !tronquee(m);
+        return m.length >= 12 && (rcode(m) == 0 || rcode(m) == 3) && !tronquee(m);
     }
 
     static int nombreReponses(byte[] m) {
         return m.length >= 8 ? ((m[6] & 0xff) << 8) | (m[7] & 0xff) : 0;
+    }
+
+    static int nombreAutorites(byte[] m) {
+        return m.length >= 10 ? ((m[8] & 0xff) << 8) | (m[9] & 0xff) : 0;
     }
 
     /**
@@ -160,7 +166,7 @@ final class DnsMessage {
         }
         try {
             int p = finQuestion(m);
-            int an = nombreReponses(m);
+            int an = nombreReponses(m) + nombreAutorites(m);
             for (int i = 0; i < an; i++) {
                 p += longueurNom(m, p);
                 if (p + 10 > m.length) {
@@ -184,6 +190,9 @@ final class DnsMessage {
     }
 
     static byte[] servfail(byte[] requete) {
+        if (requete.length < 12) {
+            return new byte[0];
+        }
         byte[] r = new byte[Math.min(requete.length, 512)];
         r[0] = requete[0];
         r[1] = requete[1];
@@ -191,7 +200,15 @@ final class DnsMessage {
         r[3] = (byte) 0x82; // RA + SERVFAIL
         r[4] = 0;
         r[5] = 1;
-        System.arraycopy(requete, 12, r, 12, r.length - 12);
+        int fin;
+        try {
+            fin = Math.min(r.length, finQuestion(requete));
+        } catch (RuntimeException e) {
+            return new byte[0];
+        }
+        if (fin > 12) {
+            System.arraycopy(requete, 12, r, 12, fin - 12);
+        }
         return r;
     }
 }

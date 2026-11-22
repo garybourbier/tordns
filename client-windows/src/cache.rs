@@ -35,35 +35,9 @@ impl Cache {
         self.entrees.clear();
     }
 
-    /// TTL minimal de la section réponse, plafonné par la durée maximale.
+    /// TTL de la section réponse (ou TTL négatif du SOA), plafonné.
     pub fn duree_ms(reponse: &[u8], duree_max_ms: u64) -> u64 {
-        let mut min: Option<u32> = None;
-        let Ok(fin) = dns::longueur_nom(reponse, 12).map(|l| 12 + l + 4) else {
-            return 0;
-        };
-        let mut p = fin;
-        for _ in 0..dns::nombre_reponses(reponse) {
-            let Ok(l) = dns::longueur_nom(reponse, p) else {
-                return 0;
-            };
-            p += l;
-            if p + 10 > reponse.len() {
-                return 0;
-            }
-            let ttl = u32::from_be_bytes([
-                reponse[p + 4],
-                reponse[p + 5],
-                reponse[p + 6],
-                reponse[p + 7],
-            ]);
-            min = Some(min.map_or(ttl, |m| m.min(ttl)));
-            let rdlen = u16::from_be_bytes([reponse[p + 8], reponse[p + 9]]) as usize;
-            p += 10 + rdlen;
-        }
-        match min {
-            Some(ttl) => (ttl as u64 * 1000).min(duree_max_ms),
-            None => 0,
-        }
+        dns::duree_cache(reponse, duree_max_ms)
     }
 
     /// Sert une réponse avec l'identifiant du client et les TTL vieillis.
@@ -144,6 +118,29 @@ mod tests {
         r[p..p + 4].copy_from_slice(&0u32.to_be_bytes());
         let mut c = Cache::new(4, 3_600_000);
         c.poser("k", &r, 0);
+        assert_eq!(c.taille(), 0);
+    }
+
+    fn negative() -> Vec<u8> {
+        let mut q = vec![0, 9, 0x81, 0x83, 0, 1, 0, 0, 0, 1, 0, 0];
+        q.extend_from_slice(&[
+            6, b'a', b'b', b's', b'e', b'n', b't', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0,
+            0, 1, 0, 1, 0xc0, 12, 0, 6, 0, 1, 0, 0, 2, 0x58, 0, 24, 0, 0, 0, 0,
+        ]);
+        for _ in 0..4 {
+            q.extend_from_slice(&3600u32.to_be_bytes());
+        }
+        q.extend_from_slice(&60u32.to_be_bytes());
+        q
+    }
+
+    #[test]
+    fn cache_reponse_negative() {
+        let mut c = Cache::new(4, 3_600_000);
+        c.poser("nx", &negative(), 0);
+        assert_eq!(c.taille(), 1);
+        assert!(c.obtenir("nx", 1, 59_999).is_some());
+        assert!(c.obtenir("nx", 1, 60_000).is_none());
         assert_eq!(c.taille(), 0);
     }
 

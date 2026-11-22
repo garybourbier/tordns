@@ -5,9 +5,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -35,6 +37,7 @@ public class MainActivity extends Activity {
     private Button boutonVpn;
     private TextView statut;
     private TextView moteur;
+    private TextView diagnosticDns;
     private TextView stats;
     private final Handler boucle = new Handler(Looper.getMainLooper());
 
@@ -92,6 +95,11 @@ public class MainActivity extends Activity {
         groupes.addView(modeFuite);
         (p.getBoolean("antifuite", false) ? modeFuite : modeDns).setChecked(true);
         racine.addView(groupes);
+
+        diagnosticDns = new TextView(this);
+        diagnosticDns.setTextSize(12);
+        diagnosticDns.setPadding(0, 8, 0, 8);
+        racine.addView(diagnosticDns);
 
         boutonVpn = new Button(this);
         boutonVpn.setText("Activer la protection");
@@ -296,6 +304,22 @@ public class MainActivity extends Activity {
         sortie.write(0);
         sortie.write(1);
         return sortie.toByteArray();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        diagnosticDns.setText(etatDoT());
+    }
+
+    /** Lit le DNS privé Android (API 28+) et explique la fuite éventuelle. */
+    private String etatDoT() {
+        if (Build.VERSION.SDK_INT < 28) {
+            return "OK : DNS privé (DoT) indisponible avant Android 9.";
+        }
+        String mode = Settings.Global.getString(getContentResolver(), "private_dns_mode");
+        String hote = Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+        return Diagnostic.dnsPrive(mode, hote);
     }
 
     @Override

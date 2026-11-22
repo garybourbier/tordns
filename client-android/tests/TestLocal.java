@@ -112,6 +112,78 @@ public final class TestLocal {
         return p;
     }
 
+    private static void ecrireEntier(java.io.ByteArrayOutputStream o, long v) {
+        o.write((int) (v >> 24));
+        o.write((int) (v >> 16));
+        o.write((int) (v >> 8));
+        o.write((int) v);
+    }
+
+    /** NXDOMAIN (ou NODATA) avec un SOA dont TTL=600, MINIMUM=60. */
+    private static byte[] reponseNegative(byte[] requete, boolean nxdomain, boolean soa) {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        o.write(requete[0]);
+        o.write(requete[1]);
+        o.write(0x81);
+        o.write(nxdomain ? 0x83 : 0x80);
+        o.write(0);
+        o.write(1);
+        o.write(0);
+        o.write(0);
+        o.write(0);
+        o.write(soa ? 1 : 0);
+        o.write(0);
+        o.write(0);
+        int fin = DnsMessage.finQuestion(requete);
+        o.write(requete, 12, fin - 12);
+        if (soa) {
+            o.write(0xc0);
+            o.write(12);
+            o.write(0);
+            o.write(6);
+            o.write(0);
+            o.write(1);
+            ecrireEntier(o, 600);
+            o.write(0);
+            o.write(24);
+            o.write(0);
+            o.write(0);
+            o.write(0);
+            o.write(0);
+            for (int i = 0; i < 4; i++) {
+                ecrireEntier(o, 3600);
+            }
+            ecrireEntier(o, 60);
+        }
+        return o.toByteArray();
+    }
+
+    /** Réponse positive à laquelle on ajoute un SOA d'autorité au TTL court. */
+    private static byte[] positiveAvecAutorite(byte[] requete) {
+        byte[] r = reponsePositive(requete);
+        r[9] = 1; // NSCOUNT
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        o.writeBytes(r);
+        o.write(0xc0);
+        o.write(12);
+        o.write(0);
+        o.write(6);
+        o.write(0);
+        o.write(1);
+        ecrireEntier(o, 30);
+        o.write(0);
+        o.write(24);
+        o.write(0);
+        o.write(0);
+        o.write(0);
+        o.write(0);
+        for (int i = 0; i < 4; i++) {
+            ecrireEntier(o, 3600);
+        }
+        ecrireEntier(o, 10);
+        return o.toByteArray();
+    }
+
     private static int ttl(byte[] reponse) {
         int p = DnsMessage.finQuestion(reponse) + DnsMessage.longueurNom(
                 reponse, DnsMessage.finQuestion(reponse));
@@ -153,6 +225,47 @@ public final class TestLocal {
         byte[] apres = cache.obtenir(DnsMessage.cle(q), 1);
         attendre(apres != null && ttl(apres) <= 298, "TTL décrémenté : " + ttl(apres));
 
+        byte[] neg = reponseNegative(requete("absent.example", 7, false), true, true);
+        attendre(DnsCache.ttlMs(neg, 3600_000L) == 60_000L, "NXDOMAIN : TTL négatif du SOA");
+        attendre(DnsCache.ttlMs(reponseNegative(requete("absent.example", 8, false), false, true),
+                3600_000L) == 60_000L, "NODATA : TTL négatif du SOA");
+        attendre(DnsCache.ttlMs(reponseNegative(requete("absent.example", 9, false), true, false),
+                3600_000L) == 0L, "NXDOMAIN sans SOA non caché");
+        attendre(DnsCache.ttlMs(positiveAvecAutorite(q), 3600_000L) == 300_000L,
+                "réponse positive : l'autorité ne compte pas");
+        attendre(DnsCache.ttlMs(r, 10_000L) == 10_000L, "plafond du cache");
+        byte[] ttlNul = reponsePositive(q);
+        ttlNul[DnsMessage.finQuestion(ttlNul)
+                + DnsMessage.longueurNom(ttlNul, DnsMessage.finQuestion(ttlNul)) + 4] = 0;
+        ttlNul[DnsMessage.finQuestion(ttlNul)
+                + DnsMessage.longueurNom(ttlNul, DnsMessage.finQuestion(ttlNul)) + 5] = 0;
+        ttlNul[DnsMessage.finQuestion(ttlNul)
+                + DnsMessage.longueurNom(ttlNul, DnsMessage.finQuestion(ttlNul)) + 6] = 0;
+        ttlNul[DnsMessage.finQuestion(ttlNul)
+                + DnsMessage.longueurNom(ttlNul, DnsMessage.finQuestion(ttlNul)) + 7] = 0;
+        attendre(DnsCache.ttlMs(ttlNul, 3600_000L) == 0L, "TTL nul non caché");
+
+        DnsCache negatif = new DnsCache(4, 3600_000L);
+        negatif.poser("nx", neg);
+        attendre(negatif.obtenir("nx", 2) != null, "réponse négative servie");
+
+        // Paquets hostiles : aucune exception ne doit sortir des briques pures.
+        java.util.Random hasard = new java.util.Random(13);
+        for (int i = 0; i < 10_000; i++) {
+            byte[] hostile = new byte[hasard.nextInt(600)];
+            hasard.nextBytes(hostile);
+            try {
+                DnsCache.ttlMs(hostile, 3600_000L);
+                DnsMessage.cacheable(hostile);
+                DnsMessage.servfail(hostile);
+                DnsMessage.avecId(hostile, i);
+                Paquet.extraire(hostile);
+            } catch (RuntimeException e) {
+                throw new AssertionError("paquet hostile a fait échouer une brique : " + e);
+            }
+        }
+        attendre(true, "10 000 paquets hostiles absorbés");
+
         DnsCache petit = new DnsCache(2, 3600_000L);
         for (int i = 0; i < 5; i++) {
             petit.poser("cle" + i, reponsePositive(requete("h" + i + ".example", i, false)));
@@ -163,6 +276,15 @@ public final class TestLocal {
         attendre(DnsMessage.rcode(sf) == 2, "SERVFAIL");
         attendre((sf[2] & 0x80) != 0 && (sf[3] & 0x80) != 0, "drapeaux réponse");
 
-        System.out.println("OK : " + verifications + " vérifications locales passées");
+        attendre(Diagnostic.dnsPrive("off", null).startsWith("OK"), "DNS privé désactivé");
+        attendre(Diagnostic.dnsPrive("opportunistic", null).contains("FUITE POSSIBLE"),
+                "DNS privé automatique signalé");
+        String strict = Diagnostic.dnsPrive("hostname", "dns.example");
+        attendre(strict.contains("FUITE") && strict.contains("dns.example")
+                && strict.contains("Désactivé"), "DNS privé strict signalé et guidé");
+        attendre(Diagnostic.dnsPrive(null, null).startsWith("OK"), "réglage absent");
+
+        System.out.println("OK : " + verifications
+                + " vérifications locales passées (dont 10 000 paquets hostiles)");
     }
 }

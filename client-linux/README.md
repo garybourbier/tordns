@@ -47,6 +47,7 @@ Le port 53 est privilégié. Trois options :
 | `-ttl-max`       | —                 | `3600` s         | plafond de mise en cache                    |
 | `-delai`         | —                 | `10s`            | délai maximal par requête DoH               |
 | `-concurrence`   | —                 | `64`             | requêtes simultanées et taille du pool DoH  |
+| `-diagnostic`    | —                 | —                | inspecte les fuites DNS puis quitte         |
 
 Exemple (`/etc/tordns/client.env`, permissions `0600`) :
 
@@ -56,6 +57,20 @@ TORDNS_SOCKS=127.0.0.1:9050
 TORDNS_ECOUTE=127.0.0.1:53
 TORDNS_CACHE=4096
 ```
+
+Diagnostic des fuites (aucun domaine n'est envoyé) :
+
+```bash
+./tordns-client --diagnostic
+# [FUITE] resolv.conf utilise le résolveur 192.168.1.1, hors TorDNS…
+# [FUITE] systemd-resolved actif (stub 127.0.0.53)…
+# [OK] aucune politique DoH d'entreprise détectée ; …
+# Bilan : 2 fuite(s) à fermer.   (code de sortie 1)
+```
+
+Il inspecte `/etc/resolv.conf` (IPv4, `::1`, stub systemd), les politiques DoH
+Firefox/Chrome/Edge et rappelle comment désactiver le DoH des profils. Une
+machine corrigée (`nameserver 127.0.0.1`) sort en code 0.
 
 Puis, pour router tout le système vers le relais, `/etc/resolv.conf` :
 
@@ -116,8 +131,9 @@ Lot de 100 requêtes mises en cache : moyenne 0.000 ms, maximum 0 ms.
 arrêt : 104 requêtes, 101 servies par le cache, 0 erreurs
 ```
 
-Tests unitaires : `go test ./...` (cache LRU/expiration, lecture de noms
-compressés, bit DO, calcul de TTL, réécriture d'identifiant, SERVFAIL).
+Tests unitaires : `go test ./...` (cache LRU/expiration, TTL positif et négatif,
+lecture de noms compressés, bit DO, réécriture d'identifiant, SERVFAIL,
+diagnostic sur fixtures, 10 000 paquets hostiles).
 
 ## Choix et garanties
 
@@ -125,9 +141,11 @@ compressés, bit DO, calcul de TTL, réécriture d'identifiant, SERVFAIL).
   par SOCKS5, l'adresse `.onion` est envoyée en nom (ATYP 3) pour que Tor la
   résolve lui-même.
 - **Cache correct** : clé = nom (casse normalisée) + type + classe + bit DO ;
-  seules les réponses complètes `NOERROR`/`NXDOMAIN` sont gardées ; le TTL
-  rendu décroît avec l'âge (plancher 1 s) ; les réponses tronquées et les
-  erreurs ne sont jamais cachées.
+  une réponse positive expire au plus petit TTL de la **section réponse**
+  (l'autorité ne raccourcit plus le cache) ; NXDOMAIN et NODATA suivent le TTL
+  négatif du SOA (minimum du TTL et du champ MINIMUM, RFC 2308), sans SOA elles
+  ne sont pas gardées. Plafond 1 h, TTL nul jamais caché, TTL rendu décroissant
+  avec l'âge ; réponses tronquées et erreurs jamais cachées.
 - **Identifiants** : l'identifiant de transaction du client est réécrit dans la
   réponse ; une réponse dont l'identifiant ne correspond pas est rejetée.
 - **Zéro journal** : seuls le démarrage, les erreurs (sans nom de domaine) et

@@ -32,32 +32,68 @@ final class DnsCache {
         };
     }
 
-    /** TTL minimal de la section réponse, borné par la durée maximale. */
+    /**
+     * TTL de la section réponse, ou TTL négatif du SOA (RFC 2308) pour
+     * NXDOMAIN/NODATA. TTL nul : pas de cache ; plafond fourni.
+     */
     static long ttlMs(byte[] reponse, long dureeMaxMs) {
         long min = Long.MAX_VALUE;
         try {
             int p = DnsMessage.finQuestion(reponse);
             int an = DnsMessage.nombreReponses(reponse);
             for (int i = 0; i < an; i++) {
-                p += DnsMessage.longueurNom(reponse, p);
-                if (p + 10 > reponse.length) {
-                    return 0;
+                int[] rr = lireRR(reponse, p);
+                min = Math.min(min, rr[1]);
+                p = rr[3];
+            }
+            if (DnsMessage.rcode(reponse) == 0 && an > 0) {
+                return borne(min, dureeMaxMs);
+            }
+            // Réponse négative : le SOA de l'autorité porte le TTL.
+            int ns = DnsMessage.nombreAutorites(reponse);
+            for (int i = 0; i < ns; i++) {
+                int[] rr = lireRR(reponse, p);
+                if (rr[0] == 6 && rr[3] - rr[2] >= 4) {
+                    long minimum = entier32(reponse, rr[3] - 4);
+                    min = Math.min(min, Math.min(rr[1], minimum));
                 }
-                long ttl = ((long) (reponse[p + 4] & 0xff) << 24)
-                        | ((long) (reponse[p + 5] & 0xff) << 16)
-                        | ((long) (reponse[p + 6] & 0xff) << 8)
-                        | (reponse[p + 7] & 0xff);
-                min = Math.min(min, ttl);
-                int rdlen = ((reponse[p + 8] & 0xff) << 8) | (reponse[p + 9] & 0xff);
-                p += 10 + rdlen;
+                p = rr[3];
             }
         } catch (RuntimeException e) {
             return 0;
         }
-        if (min == Long.MAX_VALUE) {
+        return min == Long.MAX_VALUE ? 0 : borne(min, dureeMaxMs);
+    }
+
+    private static long borne(long ttl, long dureeMaxMs) {
+        if (ttl == 0) {
             return 0;
         }
-        return Math.min(dureeMaxMs, min * 1000L);
+        return Math.min(Math.max(1000L, dureeMaxMs), ttl * 1000L);
+    }
+
+    /** Renvoie type, TTL, début des données et position suivante. */
+    private static int[] lireRR(byte[] m, int p) {
+        p += DnsMessage.longueurNom(m, p);
+        if (p + 10 > m.length) {
+            throw new IllegalArgumentException("RR tronqué");
+        }
+        int type = ((m[p] & 0xff) << 8) | (m[p + 1] & 0xff);
+        int ttl = (int) entier32(m, p + 4);
+        int rdlen = ((m[p + 8] & 0xff) << 8) | (m[p + 9] & 0xff);
+        int debut = p + 10;
+        int fin = debut + rdlen;
+        if (fin > m.length) {
+            throw new IllegalArgumentException("données tronquées");
+        }
+        return new int[] {type, ttl, debut, fin};
+    }
+
+    private static long entier32(byte[] m, int p) {
+        return ((long) (m[p] & 0xff) << 24)
+                | ((long) (m[p + 1] & 0xff) << 16)
+                | ((long) (m[p + 2] & 0xff) << 8)
+                | (m[p + 3] & 0xff);
     }
 
     synchronized byte[] obtenir(String cle, int id) {
