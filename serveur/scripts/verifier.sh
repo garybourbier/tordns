@@ -8,13 +8,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -f .env ]; then
-	set -a
-	# shellcheck disable=SC1091
-	. ./.env
-	set +a
-fi
-SOCKS_PORT="${TOR_SOCKS_PORT:-9050}"
+# Le nœud n'ouvre plus de SOCKS (Mission 7) : les preuves passent par un
+# client Tor séparé, sans port publié, qui sait joindre le .onion.
+CLIENT=tordns-tor-client
+docker compose --profile test up -d --build tor-client >/dev/null
+
+tor_curl() {
+	docker exec "$CLIENT" curl --socks5-hostname 127.0.0.1:9050 "$@"
+}
 
 echo "== 1. Résolveur récursif, DNSSEC validé (dig dans le conteneur Unbound) =="
 # Aucun port publié : on exécute dig au plus près du résolveur, sur 127.0.0.1.
@@ -40,12 +41,14 @@ requete="$(mktemp)"
 reponse="$(mktemp)"
 # ID 0x1234, RD, 1 question (example.com. A IN), EDNS0 OPT avec bit DO.
 printf '\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x01\x07example\x03com\x00\x00\x01\x00\x01\x00\x00\x29\x04\xd0\x00\x00\x80\x00\x00\x00' >"$requete"
-code="$(curl -sS --max-time 90 --socks5-hostname "127.0.0.1:$SOCKS_PORT" \
-	-o "$reponse" -w '%{http_code}' \
+docker exec -i "$CLIENT" sh -c 'cat > /tmp/requete' <"$requete"
+code="$(docker exec "$CLIENT" curl -sS --max-time 90 --socks5-hostname 127.0.0.1:9050 \
+	-o /tmp/reponse -w '%{http_code}' \
 	-H 'accept: application/dns-message' \
 	-H 'content-type: application/dns-message' \
-	--data-binary @"$requete" \
+	--data-binary @/tmp/requete \
 	"http://$onion/dns-query")"
+docker exec "$CLIENT" cat /tmp/reponse >"$reponse"
 octets="$(wc -c <"$reponse")"
 identifiant="$(head -c 2 "$reponse" | od -An -tx1 | tr -d ' \n')"
 drapeaux="$(od -An -j2 -N2 -tx1 "$reponse" | tr -d ' \n')"
@@ -66,7 +69,7 @@ rm -f "$requete" "$reponse"
 
 echo
 echo "== 4. DoH lisible (JSON) à travers Tor =="
-json="$(curl -sS --max-time 90 --socks5-hostname "127.0.0.1:$SOCKS_PORT" \
+json="$(tor_curl -sS --max-time 90 \
 	-H 'accept: application/dns-json' \
 	"http://$onion/dns-query?name=example.com&type=A")"
 echo "$json"
@@ -89,7 +92,7 @@ echo
 echo "== 5. Cloisonnement réseau =="
 docker ps --filter name=tordns --format '{{.Names}} {{.Ports}}'
 # `docker port` ne liste que les publications réelles (pas les EXPOSE).
-for c in tordns-unbound tordns-passerelle tordns-caddy; do
+for c in tordns-unbound tordns-passerelle tordns-caddy tordns-tor; do
 	if [ -n "$(docker port "$c" 2>/dev/null)" ]; then
 		echo "ÉCHEC : $c est publié sur l'hôte ($(docker port "$c" | tr '\n' ' '))." >&2
 		exit 1
@@ -176,8 +179,7 @@ fi
 
 echo
 echo "== 10. Sonde de santé anonyme =="
-sante="$(curl -sS --max-time 90 --socks5-hostname "127.0.0.1:$SOCKS_PORT" \
-	-w '\n%{http_code}' "http://$onion/healthz")"
+sante="$(tor_curl -sS --max-time 90 -w '\n%{http_code}' "http://$onion/healthz")"
 code_sante="$(printf '%s' "$sante" | tail -1)"
 corps_sante="$(printf '%s' "$sante" | head -1)"
 echo "GET /healthz via Tor -> HTTP $code_sante, corps: $corps_sante"

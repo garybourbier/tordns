@@ -40,12 +40,12 @@ Le serveur est conçu pour tourner dans un environnement conteneurisé minimalis
 ```
 
 - **Unbound** : Moteur récursif racine ultra-sécurisé, configuré en mode silencieux (`verbosity: 0`, pas de logs de requêtes), refuse le type `ANY`, limite les tailles de buffers EDNS pour contrer l'amplification.
-- **Passerelle DoH** : Convertit les requêtes HTTP POST/GET RFC 8484 en paquets DNS wireformat.
-- **Caddy / Nginx** : Terminaison HTTP, rate limiting strict par circuit, filtrage des en-têtes et sécurisation du chemin `/dns-query`.
-- **Démon Tor v3** : Expose le service caché avec clés générées hors dépôt et isolées.
+- **Passerelle DoH** : programme Go maison (`serveur/passerelle/`), sans dépendance, qui convertit les requêtes HTTP POST/GET RFC 8484 en paquets DNS wireformat vers Unbound. Limite de débit par circuit Tor en mémoire, plus un plafond global.
+- **Caddy** : front HTTP interne, lit l'en-tête PROXY v2 de Tor (identifiant de circuit), supprime les métadonnées client et réserve le chemin `/dns-query`.
+- **Démon Tor v3** : expose le service caché avec clés générées hors dépôt et isolées. Aucun port SOCKS sur le nœud ; PoW, flux par circuit bornés et vanguards activés.
 
 ### Côté Clients (Applications avec Tor Embarqué)
-Puisque les systèmes d'exploitation envoient historiquement le DNS en UDP sur le port 53 et que Tor ne transporte nativement que des flux TCP/SOCKS, le client embarque sa propre chaîne :
+Puisque les systèmes d'exploitation envoient historiquement le DNS en UDP sur le port 53 et que Tor ne transporte nativement que des flux TCP/SOCKS, chaque client fournit sa propre chaîne (Arti embarqué sur Android, Tor local en SOCKS sur Linux et Windows) :
 
 ```
 [ Application / Navigateur / OS ]

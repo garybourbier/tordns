@@ -4,6 +4,21 @@
 {
 	admin off
 	auto_https off
+
+	# Tor précède chaque connexion au service caché d'un en-tête PROXY v2
+	# (HiddenServiceExportCircuitID haproxy) dont l'adresse source encode
+	# l'identifiant de circuit. Caddy le lit et remplace l'adresse distante.
+	# Seul le réseau docker privé peut fournir un tel en-tête ; une connexion
+	# locale sans en-tête (healthcheck) reste acceptée.
+	servers {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 172.28.53.0/24
+				fallback_policy ignore
+			}
+		}
+	}
 }
 
 http://:8080 {
@@ -19,6 +34,10 @@ http://:8080 {
 
 	handle /dns-query {
 		reverse_proxy passerelle:8053 {
+			# Identifiant de circuit issu du PROXY v2 de Tor. header_up
+			# remplace toute valeur fournie par le client : impossible de
+			# choisir son seau depuis l'extérieur.
+			header_up X-TorDNS-Circuit {http.request.remote.host}
 			# Ne transmettre aucune métadonnée client inutile.
 			header_up -X-Forwarded-For
 			header_up -X-Forwarded-Proto

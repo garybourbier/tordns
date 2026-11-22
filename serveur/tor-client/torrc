@@ -1,0 +1,7 @@
+# TorDNS — client Tor éphémère pour les preuves locales (profil `test`).
+# Aucun service caché, aucun relais : uniquement un SOCKS loopback.
+ClientOnly 1
+SocksPort 127.0.0.1:9050 IsolateSOCKSAuth
+DataDirectory /var/lib/tor-client
+Log warn stdout
+SafeLogging 1

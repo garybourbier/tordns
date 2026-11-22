@@ -9,6 +9,5 @@ RUN chmod 0644 /etc/tor/torrc
 
 USER tor
 
-EXPOSE 9050
 
 ENTRYPOINT ["tor", "-f", "/etc/tor/torrc"]

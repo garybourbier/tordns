@@ -1,7 +1,10 @@
 # TorDNS — nœud Tor du serveur (Mission 2).
 # Client + service caché v3 : aucune fonction de relais.
 ClientOnly 1
-SocksPort 0.0.0.0:9050
+# Aucun port SOCKS : le nœud ne sert que de service caché. Les preuves
+# utilisent un client Tor séparé et éphémère (service `tor-client`, profil
+# `test`).
+SocksPort 0
 DataDirectory /var/lib/tor
 
 # Service caché v3 exposant le front Caddy sur le réseau docker interne.
@@ -11,6 +14,24 @@ HiddenServiceDir /var/lib/tor/hidden_service
 HiddenServiceVersion 3
 # Cible numérique obligatoire : IP fixe de Caddy sur le réseau `dns`.
 HiddenServicePort 80 172.28.53.20:8080
+
+# Transmet l'identifiant de circuit Tor dans un en-tête PROXY v2 (l'adresse
+# source porte l'identifiant sur ses 32 derniers bits). Caddy le lit, puis le
+# transmet à la passerelle pour la limite de débit par circuit.
+HiddenServiceExportCircuitID haproxy
+
+# Défenses contre les inondations du service caché (Tor >= 0.4.8).
+HiddenServicePoWDefensesEnabled 1
+# 64 flux simultanés par circuit : assez pour un résolveur, borne la mémoire
+# et l'épuisement de descripteurs ; un circuit qui dépasse est fermé.
+HiddenServiceMaxStreams 64
+HiddenServiceMaxStreamsCloseCircuit 1
+
+# Vanguards intégrés (Tor >= 0.4.7) : protège la découverte des gardes d'un
+# service caché durable. Le module externe `vanguards` n'est pas ajouté : il
+# exige un démon séparé et un contrôle par ControlPort, alors que le mode
+# « lite » couvre déjà la rotation des gardes de second niveau.
+VanguardsLiteEnabled 1
 
 # Aucune résolution DNS système : Tor résout les noms des services internes via
 # le DNS docker, et les sorties .onion ne passent jamais par Unbound.

@@ -1,7 +1,7 @@
-# TorDNS — stack serveur locale (Missions 1 à 3)
-# Aucune de ces images ne publie autre chose que 127.0.0.1 sur l'hôte.
-# Aucun journal de requêtes : ni Unbound, ni la passerelle, ni Caddy n'écrivent
-# le détail des questions DNS (voir serveur/README.md).
+# TorDNS — stack serveur locale (Missions 1 à 3, durcie en Mission 7)
+# Aucune image ne publie de port sur l'hôte : le seul point d'entrée est le
+# service caché Tor. Aucun journal de requêtes : ni Unbound, ni la passerelle,
+# ni Caddy n'écrivent le détail des questions DNS (voir serveur/README.md).
 name: tordns
 
 # Durcissement commun (Mission 3) : pas de privilèges supplémentaires, toutes
@@ -59,7 +59,7 @@ services:
       start_period: 15s
 
   # Passerelle DoH (RFC 8484) : HTTP -> DNS filaire -> Unbound.
-  # Non publiée sur l'hôte : seul Caddy (et, en Mission 2, Tor) peut l'atteindre.
+  # Non publiée sur l'hôte : seul Caddy, sur le réseau privé, peut l'atteindre.
   passerelle:
     build:
       context: ./passerelle
@@ -71,11 +71,15 @@ services:
     environment:
       UNBOUND_ADDR: "unbound:5335"
       LISTEN_ADDR: ":8053"
-      # Limite globale (pas par IP : derrière Tor, tous les clients partagent
-      # l'adresse de sortie du démon Tor) et parallélisme borné.
-      LIMITE_REQ_S: "200"
-      LIMITE_RAFALE: "400"
-      MAX_CONCURRENTS: "64"
+      # Limite par circuit Tor (identifiant fourni par Caddy via PROXY v2),
+      # plafond global et parallélisme borné. Toutes se règlent par .env.
+      LIMITE_CIRCUIT_REQ_S: "${LIMITE_CIRCUIT_REQ_S:-20}"
+      LIMITE_CIRCUIT_RAFALE: "${LIMITE_CIRCUIT_RAFALE:-40}"
+      LIMITE_CIRCUITS_MAX: "${LIMITE_CIRCUITS_MAX:-4096}"
+      LIMITE_CIRCUIT_TTL: "${LIMITE_CIRCUIT_TTL:-120}"
+      LIMITE_REQ_S: "${LIMITE_REQ_S:-200}"
+      LIMITE_RAFALE: "${LIMITE_RAFALE:-400}"
+      MAX_CONCURRENTS: "${MAX_CONCURRENTS:-64}"
     networks:
       - dns
     depends_on:
@@ -93,6 +97,7 @@ services:
   # Front HTTP local. En Mission 2, Tor exposera ce service en .onion (HTTP en
   # clair à l'intérieur du circuit Tor, jamais sur l'hôte).
   caddy:
+    # proxy_protocol exige Caddy >= 2.7 (testé avec 2.11.4).
     image: caddy:2-alpine
     container_name: tordns-caddy
     restart: unless-stopped
@@ -128,8 +133,9 @@ services:
       retries: 3
       start_period: 15s
 
-  # Service caché Tor v3 : publie Caddy sur une adresse .onion et fournit le
-  # SOCKS local utilisé pour la preuve. Les clés v3 vivent dans le volume
+  # Service caché Tor v3 : publie Caddy sur une adresse .onion. Aucun SOCKS
+  # n'est ouvert sur ce nœud (SocksPort 0) : les preuves utilisent le client
+  # `tor-client` séparé ci-dessous. Les clés v3 vivent dans le volume
   # `tor-data`, hors dépôt ; `scripts/gestion-cles.sh` en fait une copie de
   # sauvegarde dans serveur/tor/keys/ (ignoré par git).
   tor:
@@ -140,24 +146,41 @@ services:
     restart: unless-stopped
     <<: *durcissement
     mem_limit: 256m
-    environment:
-      TOR_SOCKS_PORT: "${TOR_SOCKS_PORT:-9050}"
-    ports:
-      # SOCKS uniquement sur loopback : c'est le point d'entrée des tests
-      # locaux. Le port 9050 est configurable car il peut être déjà pris par
-      # le Tor du système (voir serveur/.env.example).
-      - "127.0.0.1:${TOR_SOCKS_PORT:-9050}:9050"
     volumes:
       - tor-data:/var/lib/tor
     networks:
       - dns
       - sortie
     healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "9050"]
+      # Le fichier hostname n'apparaît qu'une fois le service publié ; il ne
+      # contient aucun secret (l'adresse est publique par nature).
+      test: ["CMD", "test", "-f", "/var/lib/tor/hidden_service/hostname"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+
+  # Client Tor séparé, uniquement pour les preuves locales : profil `test`,
+  # aucun port publié, aucun volume. À démarrer explicitement avec
+  # `docker compose --profile test up -d tor-client`.
+  tor-client:
+    build:
+      context: ./tor-client
+    image: tordns/tor-client:test
+    container_name: tordns-tor-client
+    profiles: ["test"]
+    restart: "no"
+    <<: *durcissement
+    mem_limit: 128m
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      # Le démon doit posséder son DataDirectory (uid/gid du paquet tor).
+      - /var/lib/tor-client:size=16m,mode=0700,uid=100,gid=101
+    networks:
+      - dns
+      - sortie
+    logging:
+      driver: "none"
 
 networks:
   # Réseau privé : Unbound, passerelle, Caddy et Tor. `internal: true`

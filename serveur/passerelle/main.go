@@ -106,13 +106,33 @@ func main() {
 
 	r := &resolveur{adresse: adresseUnbound, delai: 5 * time.Second}
 	limiteur := nouveauLimiteur(envNombre("LIMITE_REQ_S", 200), envNombre("LIMITE_RAFALE", 400))
+	circuits := nouveauLimiteurCircuits(
+		envNombre("LIMITE_CIRCUIT_REQ_S", 20),
+		envNombre("LIMITE_CIRCUIT_RAFALE", 40),
+		int(envNombre("LIMITE_CIRCUITS_MAX", 4096)),
+		time.Duration(envNombre("LIMITE_CIRCUIT_TTL", 120))*time.Second,
+	)
 	concurrence := make(chan struct{}, int(envNombre("MAX_CONCURRENTS", 64)))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dns-query", func(w http.ResponseWriter, req *http.Request) {
-		// Limite globale : derrière un service caché Tor, toutes les requêtes
-		// arrivent de la même IP (celle de Tor), une limite par IP serait donc
-		// inopérante ou injuste. On borne le débit total et le parallélisme.
+		// Limite par circuit : Caddy transmet l'identifiant de circuit Tor
+		// (adresse source du PROXY v2) dans X-TorDNS-Circuit et remplace toute
+		// valeur venue du client. Sans en-tête (appel interne), seule la limite
+		// globale s'applique.
+		if valeur := req.Header.Get("X-TorDNS-Circuit"); valeur != "" {
+			circuit, ok := circuitDepuisEntete(valeur)
+			if !ok {
+				erreurHTTP(w, http.StatusBadRequest)
+				return
+			}
+			if !circuits.autoriser(circuit) {
+				rejetTemporaire(w)
+				return
+			}
+		}
+		// Plafond global : protège la stack contre une attaque répartie sur
+		// beaucoup de circuits. On borne aussi le parallélisme.
 		if !limiteur.autoriser() {
 			rejetTemporaire(w)
 			return
@@ -191,6 +211,107 @@ func (l *limiteurDebit) autoriser() bool {
 	}
 	l.jetons--
 	return true
+}
+
+// circuitDepuisEntete extrait les 32 derniers bits de l'adresse source du
+// PROXY v2, où Tor place l'identifiant global de circuit (spécification
+// « Using the HAProxy PROXY protocol with onion services »). Une IPv4 est
+// acceptée pour les tests locaux.
+func circuitDepuisEntete(valeur string) (uint32, bool) {
+	ip := net.ParseIP(strings.TrimSpace(valeur))
+	if ip == nil {
+		return 0, false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return binary.BigEndian.Uint32(v4), true
+	}
+	v6 := ip.To16()
+	if v6 == nil {
+		return 0, false
+	}
+	return binary.BigEndian.Uint32(v6[12:16]), true
+}
+
+// limiteurCircuits borne le débit de chaque circuit Tor dans une table en
+// mémoire, de taille fixe et purgée par expiration. Rien n'est écrit sur
+// disque : un redémarrage remet tous les compteurs à zéro.
+type limiteurCircuits struct {
+	mu            sync.Mutex
+	debit         float64
+	rafale        float64
+	max           int
+	ttl           time.Duration
+	seaux         map[uint32]*etatCircuit
+	dernierePurge time.Time
+}
+
+type etatCircuit struct {
+	jetons  float64
+	instant time.Time
+	vu      time.Time
+}
+
+func nouveauLimiteurCircuits(debit, rafale float64, max int, ttl time.Duration) *limiteurCircuits {
+	if max < 1 {
+		max = 1
+	}
+	if ttl <= 0 {
+		ttl = time.Minute
+	}
+	return &limiteurCircuits{
+		debit:         debit,
+		rafale:        rafale,
+		max:           max,
+		ttl:           ttl,
+		seaux:         make(map[uint32]*etatCircuit),
+		dernierePurge: time.Now(),
+	}
+}
+
+func (l *limiteurCircuits) autoriser(circuit uint32) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	maintenant := time.Now()
+	if maintenant.Sub(l.dernierePurge) >= 30*time.Second {
+		l.purger(maintenant)
+		l.dernierePurge = maintenant
+	}
+
+	etat, connu := l.seaux[circuit]
+	if !connu {
+		// Table pleine : on purge d'abord les circuits inactifs ; s'il n'y a
+		// toujours pas de place, le nouveau circuit est refusé plutôt que
+		// d'évincer un circuit actif (pas de contournement par churn).
+		if len(l.seaux) >= l.max {
+			l.purger(maintenant)
+			if len(l.seaux) >= l.max {
+				return false
+			}
+		}
+		etat = &etatCircuit{jetons: l.rafale, instant: maintenant}
+		l.seaux[circuit] = etat
+	}
+
+	etat.jetons += maintenant.Sub(etat.instant).Seconds() * l.debit
+	if etat.jetons > l.rafale {
+		etat.jetons = l.rafale
+	}
+	etat.instant = maintenant
+	etat.vu = maintenant
+	if etat.jetons < 1 {
+		return false
+	}
+	etat.jetons--
+	return true
+}
+
+func (l *limiteurCircuits) purger(maintenant time.Time) {
+	for circuit, etat := range l.seaux {
+		if maintenant.Sub(etat.vu) > l.ttl {
+			delete(l.seaux, circuit)
+		}
+	}
 }
 
 func rejetTemporaire(w http.ResponseWriter) {
