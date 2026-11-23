@@ -1,0 +1,20 @@
+[package]
+name = "tordns-windows-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tordns_win = { package = "tordns-windows", path = ".." }
+
+[[bin]]
+name = "dns"
+path = "fuzz_targets/dns.rs"
+test = false
+doc = false
+
+[workspace]
