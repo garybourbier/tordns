@@ -1,6 +1,7 @@
 module tordns/client-linux
 
 go 1.23.0
+toolchain go1.23.7
 
 require (
 	github.com/miekg/dns v1.1.68

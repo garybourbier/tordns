@@ -8,7 +8,14 @@ set -euo pipefail
 RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 ARCH=${1:-}
 DIST=${DIST:-"$RACINE/dist/client-windows/$ARCH"}
-VERSION=${VERSION:-$(tr -d '[:space:]' <"$RACINE/noeud/VERSION")}
+VERSION=${VERSION:-$("$RACINE/scripts/ci/version.sh")}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$RACINE/scripts/ci/source-date-epoch.sh")}
+export SOURCE_DATE_EPOCH
+if command -v python3 >/dev/null 2>&1; then PYTHON=python3; elif command -v python >/dev/null 2>&1; then PYTHON=python; else
+	echo "ERREUR : python3/python requis pour fixer l'horodatage PE" >&2; exit 1
+fi
+PE_SCRIPT="$RACINE/scripts/ci/pe-timestamp.py"
+if command -v cygpath >/dev/null 2>&1; then PE_SCRIPT=$(cygpath -w "$PE_SCRIPT"); fi
 WINTUN_URL="https://www.wintun.net/builds/wintun-0.14.1.zip"
 WINTUN_ZIP_SHA256="07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tordns-win.XXXXXX")
@@ -32,15 +39,24 @@ fi
 section() { printf '\n== %s ==\n' "$*"; }
 
 section "1. Tests Rust (hôte)"
-(cd "$RACINE/client-windows" && cargo test)
+(cd "$RACINE/client-windows" && cargo test --locked)
 
 section "2. Binaire Windows $ARCH ($CIBLE)"
 rustup target add "$CIBLE" >/dev/null 2>&1 || true
-(cd "$RACINE/client-windows" && cargo build --release --target "$CIBLE")
+case "$CIBLE" in
+	*-gnu) HORODATAGE="-C link-arg=-Wl,--no-insert-timestamp" ;;
+	*) HORODATAGE="-C link-arg=/Brepro" ;;
+esac
+(cd "$RACINE/client-windows" && \
+	RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$RACINE=. -C debuginfo=0 $HORODATAGE" \
+	cargo build --release --locked --target "$CIBLE")
 EXE="$RACINE/client-windows/target/$CIBLE/release/tordns-client.exe"
 [ -s "$EXE" ] || { echo "ERREUR : exe absent : $EXE" >&2; exit 1; }
 mkdir -p "$DIST"
 install -m 0755 "$EXE" "$DIST/tordns-client.exe"
+EXE_WIN="$DIST/tordns-client.exe"
+if command -v cygpath >/dev/null 2>&1; then EXE_WIN=$(cygpath -w "$EXE_WIN"); fi
+"$PYTHON" "$PE_SCRIPT" "$EXE_WIN" "$SOURCE_DATE_EPOCH"
 
 section "3. wintun.dll $WINTUN_DIR (SHA-256 épinglé)"
 ZIP="$TMP/wintun.zip"
@@ -81,10 +97,12 @@ if command -v cygpath >/dev/null 2>&1; then
 	WINTUN=$(cygpath -w "$WINTUN")
 	SORTIE=$(cygpath -w "$SORTIE")
 fi
+touch -d "@$SOURCE_DATE_EPOCH" "$BINAIRE" "$WINTUN"
 (cd "$RACINE/client-windows/installateur" && \
 	"$MAKENSIS" "-DARCH=$ARCH" "-DVERSION=$VERSION" "-DBINAIRE=$BINAIRE" \
 		"-DWINTUN=$WINTUN" "-DSORTIE=$SORTIE" tordns.nsi)
 [ -s "$SORTIE" ] || { echo "ERREUR : installateur absent : $SORTIE" >&2; exit 1; }
+"$PYTHON" "$PE_SCRIPT" "$SORTIE" "$SOURCE_DATE_EPOCH"
 
 section "5. Résultat"
 ls -l "$DIST"

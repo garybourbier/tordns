@@ -1,6 +1,7 @@
 module tordns/client-macos
 
 go 1.23.0
+toolchain go1.23.7
 
 require (
 	tordns/client-linux v0.0.0

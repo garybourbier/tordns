@@ -12,7 +12,15 @@ TAG=${1:-}
 VERSION=${TAG#v}
 REGISTRE=${REGISTRE:-ghcr.io/garybourbier}
 DIST=${DIST:-"$RACINE/dist"}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$RACINE/scripts/ci/source-date-epoch.sh")}
+export SOURCE_DATE_EPOCH
 mkdir -p "$DIST"
+options=()
+if docker buildx build --help 2>&1 | grep -q -- --rewrite-timestamp; then
+	options+=(--rewrite-timestamp)
+else
+	echo "AVERTISSEMENT : buildx sans --rewrite-timestamp ; images non reproductibles (NON PROUVÉ)." >&2
+fi
 : >"$DIST/images.txt"
 
 for dockerfile in $(find "$RACINE/noeud" "$RACINE/serveur" "$RACINE/controleur" -name Dockerfile | sort); do
@@ -21,7 +29,7 @@ for dockerfile in $(find "$RACINE/noeud" "$RACINE/serveur" "$RACINE/controleur" 
 	slug=$(printf '%s' "$rel" | tr '/' '-')
 	ref="$REGISTRE/tordns-$slug"
 	echo "-- $rel -> $ref:$VERSION"
-	docker buildx build --platform linux/amd64,linux/arm64 --push \
+	docker buildx build --platform linux/amd64,linux/arm64 --push "${options[@]}" \
 		-t "$ref:$VERSION" -t "$ref:latest" "$contexte"
 	digest=$(docker buildx imagetools inspect "$ref:$VERSION" --format '{{.Manifest.Digest}}')
 	printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$' ||

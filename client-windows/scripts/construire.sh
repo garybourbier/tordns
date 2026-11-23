@@ -6,10 +6,13 @@ RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CIBLE="x86_64-pc-windows-gnu"
 
 echo "== 1. Tests portables =="
-(cd "$RACINE" && cargo test)
+(cd "$RACINE" && cargo test --locked)
 
 echo "== 2. Binaire Windows ($CIBLE) =="
-(cd "$RACINE" && cargo build --release --target "$CIBLE")
+RACINE_ABS=$RACINE
+(cd "$RACINE" && \
+    RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$RACINE_ABS=. -C debuginfo=0 -C link-arg=-Wl,--no-insert-timestamp" \
+    cargo build --release --locked --target "$CIBLE")
 mkdir -p "$RACINE/dist"
 cp "$RACINE/target/$CIBLE/release/tordns-client.exe" "$RACINE/dist/"
 

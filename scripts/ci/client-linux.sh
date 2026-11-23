@@ -8,7 +8,10 @@ set -euo pipefail
 RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 ARCH=${1:-}
 DIST=${DIST:-"$RACINE/dist/client-linux"}
-VERSION=${VERSION:-$(tr -d '[:space:]' <"$RACINE/noeud/VERSION")}
+VERSION=${VERSION:-$("$RACINE/scripts/ci/version.sh")}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$RACINE/scripts/ci/source-date-epoch.sh")}
+export SOURCE_DATE_EPOCH
+export GOTOOLCHAIN=go1.23.7
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tordns-linux.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -42,11 +45,11 @@ for binaire in tordns-client tordns-client-maj; do
 	if [ "$binaire" = tordns-client-maj ]; then
 		(cd "$RACINE/client-linux" && \
 			CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOARM="$GOARM" \
-			go build -trimpath -ldflags "-s -w -buildid= -X main.version=$VERSION" -o "$TMP/$binaire" ./cmd/maj)
+			go build -buildvcs=false -trimpath -ldflags "-s -w -buildid= -X main.version=$VERSION" -o "$TMP/$binaire" ./cmd/maj)
 	else
 		(cd "$RACINE/client-linux" && \
 			CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOARM="$GOARM" \
-			go build -trimpath -ldflags "-s -w -buildid= -X main.version=$VERSION" -o "$TMP/$binaire" .)
+			go build -buildvcs=false -trimpath -ldflags "-s -w -buildid= -X main.version=$VERSION" -o "$TMP/$binaire" .)
 	fi
 	verifier_statique "$TMP/$binaire"
 done
@@ -62,8 +65,9 @@ install -m 0644 "$RACINE/client-linux/README.md" "$STAGE/usr/share/doc/tordns/RE
 
 mkdir -p "$DIST"
 ARCHIVE="$DIST/tordns-client_${VERSION}_linux_${ARCH}.tar.gz"
-tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-	-C "$TMP" -czf "$ARCHIVE" "tordns-client-linux-$ARCH"
+tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+	-C "$TMP" -cf "$TMP/archive.tar" "tordns-client-linux-$ARCH"
+gzip -n -9 <"$TMP/archive.tar" >"$ARCHIVE"
 
 if [ "$ARCH" = amd64 ] || [ "$ARCH" = arm64 ]; then
 	DEB="$TMP/deb"
@@ -85,11 +89,11 @@ EOF
 	printf '2.0\n' >"$TMP/debian-binary"
 	# Un paquet Debian attend ./control à la racine de control.tar, pas un
 	# sous-dossier DEBIAN/.
-	tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+	tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
 		-C "$DEB/DEBIAN" -cJf "$TMP/control.tar.xz" .
-	tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+	tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
 		-C "$DEB" -cJf "$TMP/data.tar.xz" ./usr
-	(cd "$TMP" && ar rcs "$DIST/tordns-client_${VERSION}_${ARCH}.deb" \
+	(cd "$TMP" && ar rcsD "$DIST/tordns-client_${VERSION}_${ARCH}.deb" \
 		debian-binary control.tar.xz data.tar.xz)
 fi
 

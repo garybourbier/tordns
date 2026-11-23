@@ -7,7 +7,10 @@ set -euo pipefail
 
 RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 DIST=${DIST:-"$RACINE/dist/client-macos"}
-VERSION=$(tr -d '[:space:]' <"$RACINE/noeud/VERSION")
+VERSION=${VERSION:-$("$RACINE/scripts/ci/version.sh")}
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$("$RACINE/scripts/ci/source-date-epoch.sh")}
+export SOURCE_DATE_EPOCH
+export GOTOOLCHAIN=go1.23.7
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tordns-macos.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
@@ -22,11 +25,11 @@ section "2. Binaires Mach-O amd64 et arm64"
 for arch in amd64 arm64; do
 	(cd "$RACINE/client-macos" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=0 \
-		go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+		go build -buildvcs=false -trimpath -ldflags "-s -w -buildid= -X main.version=$VERSION" \
 		-o "$DIST/tordns-client-darwin-$arch" .)
 	(cd "$RACINE/client-macos" && \
 		GOOS=darwin GOARCH="$arch" CGO_ENABLED=0 \
-		go build -trimpath -ldflags "-s -w" \
+		go build -buildvcs=false -trimpath -ldflags "-s -w -buildid=" \
 		-o "$DIST/tordns-client-maj-darwin-$arch" ./maj)
 	file "$DIST/tordns-client-darwin-$arch"
 	file "$DIST/tordns-client-maj-darwin-$arch"

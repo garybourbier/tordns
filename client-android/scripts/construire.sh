@@ -18,6 +18,8 @@ CONSTRUCTION="$RACINE/build"
 ABIS="${ABIS:-arm64-v8a}"
 UNIVERSEL="${UNIVERSEL:-non}"
 KS="${DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}"
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$RACINE" log -1 --format=%ct 2>/dev/null || echo 0)}
+export SOURCE_DATE_EPOCH
 
 for outil in "$OUTILS/aapt2" "$OUTILS/d8" "$OUTILS/zipalign" "$OUTILS/apksigner" \
 	"$ANDROID_JAR" "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"; do
@@ -47,14 +49,14 @@ configurer_abi() {
 	export "AR_${TARGET_ENV}=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 	export "CARGO_TARGET_${TARGET_MAJ}_LINKER=$CLANG"
 	# Android 16 exige des segments LOAD alignés sur 16 Kio pour les .so.
-	export "CARGO_TARGET_${TARGET_MAJ}_RUSTFLAGS=-C link-arg=-Wl,--build-id=sha1 -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
+	export "CARGO_TARGET_${TARGET_MAJ}_RUSTFLAGS=--remap-path-prefix=$RACINE=. -C link-arg=-Wl,--build-id=sha1 -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
 }
 
 echo "== 1. Bibliothèques Tor (Arti) : $ABIS =="
 for abi in $ABIS; do
 	configurer_abi "$abi"
 	echo "-- $abi ($TARGET_RUST)"
-	(cd "$RACINE/rust" && cargo build --release --target "$TARGET_RUST")
+	(cd "$RACINE/rust" && cargo build --release --locked --target "$TARGET_RUST")
 done
 
 echo "== 2. Ressources et R.java =="
@@ -105,9 +107,12 @@ monter_apk() {
 	# -P 16 aligne les .so non compressés sur 16 Kio (Android 16).
 	"$OUTILS/zipalign" -f -P 16 4 "$CONSTRUCTION/unsigned.apk" "$CONSTRUCTION/aligned.apk"
 	"$OUTILS/zipalign" -c -P 16 4 "$CONSTRUCTION/aligned.apk" >/dev/null
+	# L'APK publié reste non signé : Gary ajoute ensuite la signature de
+	# publication. La copie debug sert uniquement aux essais adb.
+	cp "$CONSTRUCTION/aligned.apk" "$nom"
 	"$OUTILS/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
-		--min-sdk-version 26 --out "$nom" "$CONSTRUCTION/aligned.apk"
-	"$OUTILS/apksigner" verify "$nom" >/dev/null
+		--min-sdk-version 26 --out "${nom%.apk}-debug.apk" "$nom"
+	"$OUTILS/apksigner" verify "${nom%.apk}-debug.apk" >/dev/null
 }
 
 echo "== 5. APK par ABI =="
@@ -117,8 +122,8 @@ for abi in $ABIS; do
 	echo "APK : $APK"
 done
 # Compatibilité avec les preuves des missions précédentes (arm64 par défaut).
-if [ "$ABIS" = "arm64-v8a" ] && [ -f "$CONSTRUCTION/tordns-client-arm64-v8a-NON-SIGNE-POUR-PUBLICATION.apk" ]; then
-	cp "$CONSTRUCTION/tordns-client-arm64-v8a-NON-SIGNE-POUR-PUBLICATION.apk" "$CONSTRUCTION/tordns-client.apk"
+if [ "$ABIS" = "arm64-v8a" ] && [ -f "$CONSTRUCTION/tordns-client-arm64-v8a-NON-SIGNE-POUR-PUBLICATION-debug.apk" ]; then
+	cp "$CONSTRUCTION/tordns-client-arm64-v8a-NON-SIGNE-POUR-PUBLICATION-debug.apk" "$CONSTRUCTION/tordns-client.apk"
 fi
 
 if [ "$UNIVERSEL" = oui ]; then
