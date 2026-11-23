@@ -24,7 +24,7 @@ if [ -f "$SDK/platforms/android-34/android.jar" ] && [ -f "$RACINE/client-androi
     mkdir -p "$TMP/android"
     # shellcheck disable=SC2046
     javac --release 11 -Xlint:all -Werror \
-        -classpath "$SDK/platforms/android-34/android.jar" \
+        -classpath "$SDK/platforms/android-34/android.jar:$RACINE/client-android/libs/*" \
         -d "$TMP/android" \
         $(find "$RACINE/client-android/app/src/main/java" "$RACINE/client-android/build/gen" -name '*.java')
     echo "Interface Android compilée (javac + android.jar)."

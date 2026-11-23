@@ -20,7 +20,10 @@ CookieAuthFileGroupReadable 1
 # communauté ; sa clé est générée par Tor dans ce dossier, hors dépôt.
 HiddenServiceDir /var/lib/tor/registre
 HiddenServiceVersion 3
-HiddenServicePort 80 registre:8080
+# Cible par IP fixe (et non par nom) : Tor refuse une cible dont le nom
+# n'est pas encore résolvable au démarrage. Le registre attend pourtant que
+# Tor soit sain : l'IP fixe du compose casse ce cycle.
+HiddenServicePort 80 172.28.58.10:8080
 HiddenServiceExportCircuitID haproxy
 HiddenServiceMaxStreams 64
 HiddenServiceMaxStreamsCloseCircuit 1

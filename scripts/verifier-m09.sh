@@ -108,7 +108,7 @@ echo "== 2. Clé maîtresse : création, mode 0700, idempotence =="
     >"$TMP/maitresse.txt" 2>&1
 masquer() { sed -E 's/[a-z2-7]{56}\.onion/<adresse>/g'; }
 
-grep -E 'OK : clé maîtresse créée|Adresse maîtresse' "$TMP/maitresse.txt" | masquer
+grep -E 'OK : clé maitresse créée|Adresse maitresse' "$TMP/maitresse.txt" | masquer
 MAITRESSE=$(tr -d ' \r\n' <"$CTL/maitresse.onion")
 printf '%s' "$MAITRESSE" | grep -Eq '^[a-z2-7]{56}\.onion$' || {
     echo "ÉCHEC : adresse maîtresse invalide : $MAITRESSE" >&2

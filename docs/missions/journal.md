@@ -173,3 +173,27 @@ Une entrée par mission : fait, reste, demandé à qui.
   planifiée et un appareil Android pour la session d'installation ; à Claude,
   une relecture des chemins de retour arrière Windows et de la conservation de
   la clé APK. Les preuves de négation NSEC/NSEC3 restent à confier à Claude.
+
+## Vérification intégrée après la mission 12 (23/11/2026)
+
+- **Fait** : les sept scripts `scripts/verifier-m07.sh` à `verifier-m13.sh`
+  ont été rejoués sur l'arbre final. Plusieurs défauts d'intégration sont corrigés.
+  (1) Le contrôleur ne démarrait plus : Tor 0.4.9 refuse une cible de service
+  caché par nom non résolvable (`registre:8080`), alors que le registre attend
+  Tor sain — cycle cassé en épinglant le registre en `172.28.58.10` et en
+  ciblant cette IP dans `torrc`. (2) Unbound du contrôleur redémarrait en
+  boucle : rootfs en lecture seule et `cap_drop: ALL` empêchaient l'entrypoint
+  de préparer `/var/lib/unbound` ; ajout des mêmes capacités que le nœud
+  (`CHOWN`, `DAC_OVERRIDE`, `SETUID`, `SETGID`) et d'un `tmpfs` inscriptible.
+  (3) Les preuves M09 (accent « maîtresse »), M11 (cache de manifeste hors de
+  `/var/lib`) et M13 (jars `dnsjava` au classpath) suivaient encore l'ancien
+  comportement.
+- **Preuves** : M07, M08, M10, M11, M12 et M13 `code=0` ; M09 `code=0` avec
+  vraie publication Tor (maître joignable en 60 s, 10/10 DoH, continuité après
+  arrêt d'un nœud et perte du contrôleur).
+- **Reste / non prouvé** : les limites déjà notées pour M09 (un seul hôte,
+  trois instances, survie mesurée quelques minutes) et M12 (VM Windows,
+  appareil Android, DNSSEC contre l'Internet réel, NSEC/NSEC3 Linux) restent
+  inchangées.
+- **Demandé à qui** : à Gary, un second hôte pour M09 et une VM Windows/appareil
+  Android pour M12 ; à Claude, la relecture des preuves de négation NSEC/NSEC3.

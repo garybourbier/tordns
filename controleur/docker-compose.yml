@@ -126,6 +126,18 @@ services:
     image: tordns/unbound:local
     container_name: tordns-controleur-unbound
     <<: *durcissement
+    # Comme le nœud : l'entrypoint prépare l'ancre (chown puis passage à
+    # l'utilisateur unbound), puis Unbound abandonne ces privilèges.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    # Le point de montage de l'ancre racine doit rester inscriptible malgré
+    # le rootfs en lecture seule ; l'entrypoint y régénère root.key.
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/lib/unbound:size=16m,mode=0755
     mem_limit: 192m
     cpus: 0.50
     networks:
@@ -171,7 +183,11 @@ services:
       unbound:
         condition: service_healthy
     networks:
-      - controleur
+      controleur:
+        # IP fixe ciblée par le service caché Tor (torrc). Évite un cycle :
+        # Tor ne peut pas résoudre « registre » avant que ce conteneur tourne,
+        # et le registre attend que Tor soit sain.
+        ipv4_address: 172.28.58.10
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/etat"]
       interval: 30s

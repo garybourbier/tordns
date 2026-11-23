@@ -225,6 +225,7 @@ cat >"$TMP/etat-client.json" <<EOF
 EOF
 cmn_client=("$TMP/tordns-client-maj" -manifeste "$BASE/manifeste.json" -socks "" \
     -etat "$TMP/etat-client.json" -binaire "$TMP/client-installe" \
+    -cache-manifeste "$TMP/maj-client/manifeste.json" \
     -service tordns-client -systemctl "$TMP/faux-systemctl" -cle "$CLE")
 "${cmn_client[@]}" >"$TMP/client-v2.log" 2>&1 ||
     { cat "$TMP/client-v2.log" >&2; echec "client : v2 refusée"; }
