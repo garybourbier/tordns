@@ -21,6 +21,8 @@ const (
 	digestV2 = "sha256:" + "2222222222222222222222222222222222222222222222222222222222222222"
 	imageV1  = "ghcr.io/tordns/unbound@" + digestV1
 	imageV2  = "ghcr.io/tordns/unbound@" + digestV2
+	digestV3 = "sha256:" + "3333333333333333333333333333333333333333333333333333333333333333"
+	imageV3  = "ghcr.io/tordns/unbound@" + digestV3
 )
 
 func manifesteSigne(t *testing.T, priv ed25519.PrivateKey, version int64, image string) ([]byte, []byte) {
@@ -171,7 +173,9 @@ func TestImageCasseeRetourArriere(t *testing.T) {
 
 	// current reflète ce que docker vient d'appliquer ; la santé échoue sur v2.
 	current := imageV1
+	appels := 0
 	u := &maj{cfg: cfg, log: os.Stdout, docker: func(args ...string) error {
+		appels++
 		if len(args) > 0 && args[0] == "up" {
 			override, err := os.ReadFile(filepath.Join(cfg.ComposeDir, "maj-images.yml"))
 			if err != nil {
@@ -216,8 +220,73 @@ func TestImageCasseeRetourArriere(t *testing.T) {
 		t.Fatalf("retour arrière non effectué : %s", current)
 	}
 	etat, _ := lireEtat(cfg.Etat)
-	if etat.Version != 1 {
-		t.Fatalf("état avancé malgré le retour arrière : %+v", etat)
+	if etat.Version != 1 || etat.Rejetee != 2 {
+		t.Fatalf("état incorrect après retour arrière : %+v", etat)
+	}
+	// Second passage du minuteur : la v2 rejetée ne doit pas être réappliquée.
+	appels = 0
+	if err := u.executer(); err == nil || !strings.Contains(err.Error(), "déjà rejetée") {
+		t.Fatalf("v2 cassée retentée : %v", err)
+	}
+	if appels != 0 {
+		t.Fatalf("docker relancé pour une version rejetée : %d appels", appels)
+	}
+}
+
+func TestVersionRejeteePuisV3(t *testing.T) {
+	cfg, _, priv := preparer(t, http.NotFound)
+	etatInitial(t, cfg)
+	if err := ecrireEtat(cfg.Etat, Etat{
+		Version: 1,
+		Images:  map[string]string{"unbound": imageV1},
+		Rejetee: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	current := imageV1
+	u := &maj{cfg: cfg, log: os.Stdout, docker: func(args ...string) error {
+		if len(args) > 0 && args[0] == "up" {
+			override, err := os.ReadFile(filepath.Join(cfg.ComposeDir, "maj-images.yml"))
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(override), imageV3) {
+				current = imageV3
+			} else {
+				current = imageV1
+			}
+		}
+		return nil
+	}}
+	sante := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if current == imageV3 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer sante.Close()
+	cfg.Sante = sante.URL
+	brut, signature := manifesteSigne(t, priv, 3, imageV3)
+	serveur := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sig") {
+			w.Write(signature)
+			return
+		}
+		w.Write(brut)
+	}))
+	defer serveur.Close()
+	cfg.ManifesteURL = serveur.URL + "/manifeste.json"
+	cfg.SignatureURL = serveur.URL + "/manifeste.json.sig"
+	u.cfg = cfg
+	u.client = cfgClient(t, cfg)
+
+	if err := u.executer(); err != nil {
+		t.Fatalf("v3 refusée après rejet de v2 : %v", err)
+	}
+	etat, _ := lireEtat(cfg.Etat)
+	if etat.Version != 3 || etat.Images["unbound"] != imageV3 || etat.Rejetee != 0 {
+		t.Fatalf("état v3 incorrect : %+v", etat)
 	}
 }
 

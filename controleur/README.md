@@ -51,12 +51,15 @@ adresse affichée par `sudo cat $DONNEES/tor/registre/hostname`). Il expose :
 Un candidat n'est admis qu'après **72 h de sondes toutes réussies** (réglable
 par `-quarantaine`). À chaque passe, trois domaines sont tirés au hasard dans
 la liste publique (`domaines.txt`) et les réponses A, le RCODE et le bit AD du
-nœud sont comparés à la résolution DNSSEC d'Unbound. Comparer les adresses, et
-pas seulement AD, empêche un nœud de renvoyer une fausse IP avec AD=1. La
-liste ne doit contenir que des zones stables, sans CDN géographique. Un
-mensonge évince immédiatement ; une indisponibilité prolongée aussi. Le
-registre limite les inscriptions par circuit Tor (PROXY v2) et par jour ;
-derrière Tor, une limite par adresse réseau seule n'aurait aucun sens.
+nœud sont comparés à la résolution DNSSEC d'Unbound. Une intersection d'au
+moins une adresse suffit : un CDN ou un tourniquet peut légitimement renvoyer
+un autre ensemble. Un RCODE ou un AD différent, ou un ensemble disjoint sur
+une réponse signée, est un mensonge immédiat. Sur une réponse non signée, un
+ensemble disjoint n'est qu'un doute : il en faut plusieurs sur des domaines
+distincts (`-doutes-max`, 3 par défaut) pour disqualifier. Un mensonge évince
+immédiatement ; une indisponibilité prolongée aussi. Le registre limite les
+inscriptions par circuit Tor (PROXY v2) et par jour ; derrière Tor, une limite
+par adresse réseau seule n'aurait aucun sens.
 
 Le pool communauté est appliqué par un timer de deux minutes :
 

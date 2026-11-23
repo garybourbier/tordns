@@ -10,6 +10,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +37,7 @@ var (
 type config struct {
 	Quarantaine         time.Duration
 	EchecsMax           int
+	DoutesMax           int
 	IndispoMax          int
 	SondesMin           int
 	MaxInscriptionsJour int
@@ -50,23 +51,25 @@ type config struct {
 }
 
 type candidat struct {
-	Adresse   string    `json:"adresse"`
-	Defi      string    `json:"defi"`
-	Contact   string    `json:"contact,omitempty"`
-	Depuis    time.Time `json:"depuis"`
-	Confirme  bool      `json:"confirme"`
-	SondesOK  int       `json:"sondes_ok"`
-	SondesKO  int       `json:"sondes_ko"`
-	DernierKO time.Time `json:"dernier_ko,omitempty"`
+	Adresse   string               `json:"adresse"`
+	Defi      string               `json:"defi"`
+	Contact   string               `json:"contact,omitempty"`
+	Depuis    time.Time            `json:"depuis"`
+	Confirme  bool                 `json:"confirme"`
+	SondesOK  int                  `json:"sondes_ok"`
+	SondesKO  int                  `json:"sondes_ko"`
+	DernierKO time.Time            `json:"dernier_ko,omitempty"`
+	Doutes    map[string]time.Time `json:"doutes,omitempty"`
 }
 
 type admis struct {
-	Adresse    string    `json:"adresse"`
-	Depuis     time.Time `json:"depuis"`
-	SondesOK   int       `json:"sondes_ok"`
-	SondesKO   int       `json:"sondes_ko"`
-	Disponible float64   `json:"disponibilite"`
-	DernierOK  time.Time `json:"dernier_ok"`
+	Adresse    string               `json:"adresse"`
+	Depuis     time.Time            `json:"depuis"`
+	SondesOK   int                  `json:"sondes_ok"`
+	SondesKO   int                  `json:"sondes_ko"`
+	Disponible float64              `json:"disponibilite"`
+	DernierOK  time.Time            `json:"dernier_ok"`
+	Doutes     map[string]time.Time `json:"doutes,omitempty"`
 }
 
 type etat struct {
@@ -79,7 +82,7 @@ type etat struct {
 }
 
 type registre struct {
-	mu     sync.Mutex
+	mu         sync.Mutex
 	cfg        config
 	etat       etat
 	chemin     string
@@ -98,6 +101,9 @@ func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
 	}
 	if cfg.EchecsMax <= 0 {
 		cfg.EchecsMax = 1
+	}
+	if cfg.DoutesMax <= 0 {
+		cfg.DoutesMax = 3
 	}
 	if cfg.IndispoMax <= 0 {
 		cfg.IndispoMax = 6
@@ -282,26 +288,74 @@ func (r *registre) confirmer(adresse string) (candidat, error) {
 }
 
 // sonder interroge un nœud sur tous les domaines et compare à la référence.
-func (r *registre) sonder(adresse string, domaines []string) error {
+// Un RCODE ou un bit AD différent est un mensonge. Pour les adresses A, une
+// intersection suffit : les CDN et les tourniquets renvoient légitimement des
+// ensembles différents. Un ensemble disjoint sur une réponse signée reste un
+// mensonge ; sur une réponse non signée, c'est seulement un doute, identifié
+// par une empreinte de domaine (jamais le nom en clair).
+func (r *registre) sonder(adresse string, domaines []string) ([]string, error) {
 	url, err := urlNoeud(adresse)
 	if err != nil {
-		return errIndisponible
+		return nil, errIndisponible
 	}
+	var douteux []string
 	for _, domaine := range domaines {
 		attendu, err := interrogerReference(r.cfg.Reference, domaine)
 		if err != nil {
-			return fmt.Errorf("référence DNSSEC indisponible")
+			return nil, fmt.Errorf("référence DNSSEC indisponible")
 		}
 		obtenu, _, err := interrogerDoH(r.cfg.Client, url, domaine)
 		if err != nil {
-			return errIndisponible
+			return nil, errIndisponible
 		}
-		if obtenu.Rcode != attendu.Rcode || obtenu.AD != attendu.AD ||
-			!slices.Equal(obtenu.IPs, attendu.IPs) {
-			return errMensonge
+		if obtenu.Rcode != attendu.Rcode || obtenu.AD != attendu.AD {
+			return nil, errMensonge
+		}
+		if len(attendu.IPs) == 0 && len(obtenu.IPs) == 0 {
+			continue
+		}
+		if intersection(attendu.IPs, obtenu.IPs) {
+			continue
+		}
+		if attendu.AD || obtenu.AD {
+			return nil, errMensonge
+		}
+		douteux = append(douteux, empreinteDomaine(domaine))
+	}
+	return douteux, nil
+}
+
+// intersection compare deux listes triées d'adresses sans allouer de map.
+func intersection(a, b []string) bool {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			return true
+		case a[i] < b[j]:
+			i++
+		default:
+			j++
 		}
 	}
-	return nil
+	return false
+}
+
+// empreinteDomaine permet de compter les doutes sur des domaines distincts
+// sans conserver ni journaliser les noms testés.
+func empreinteDomaine(domaine string) string {
+	somme := sha256.Sum256([]byte(strings.ToLower(strings.TrimSuffix(domaine, "."))))
+	return hex.EncodeToString(somme[:8])
+}
+
+func ajouterDoutes(doutes map[string]time.Time, domaines []string, maintenant time.Time) map[string]time.Time {
+	if doutes == nil {
+		doutes = map[string]time.Time{}
+	}
+	for _, domaine := range domaines {
+		doutes[domaine] = maintenant
+	}
+	return doutes
 }
 
 // passe sonde tous les nœuds une fois. Renvoie vrai si l'ensemble des admis a
@@ -322,7 +376,7 @@ func (r *registre) passe() (bool, error) {
 	// Un sous-ensemble aléatoire de la liste publique à chaque passe : un nœud
 	// ne peut pas savoir quels domaines seront testés.
 	domaines := append([]string(nil), r.cfg.Domaines...)
-mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = domaines[j], domaines[i] })
+	mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = domaines[j], domaines[i] })
 	if len(domaines) > r.cfg.DomainesParPasse {
 		domaines = domaines[:r.cfg.DomainesParPasse]
 	}
@@ -336,7 +390,7 @@ mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = doma
 		if candidat && !confirme {
 			continue
 		}
-		err := r.sonder(adresse, domaines)
+		douteux, err := r.sonder(adresse, domaines)
 		r.mu.Lock()
 		if c, ok := r.etat.Candidats[adresse]; ok {
 			if err != nil {
@@ -349,6 +403,13 @@ mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = doma
 					// « Toutes réussies » : un échec réseau remet le délai à zéro.
 					c.Depuis = maintenant
 					c.SondesOK = 0
+				}
+			} else if len(douteux) > 0 {
+				c.Doutes = ajouterDoutes(c.Doutes, douteux, maintenant)
+				if len(c.Doutes) >= r.cfg.DoutesMax {
+					// N domaines distincts divergents : le candidat n'est pas
+					// fiable, même si chaque écart pris seul pouvait être un CDN.
+					delete(r.etat.Candidats, adresse)
 				}
 			} else {
 				c.SondesOK++
@@ -370,6 +431,13 @@ mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = doma
 				a.SondesKO++
 				if errors.Is(err, errMensonge) && a.SondesKO >= r.cfg.EchecsMax ||
 					errors.Is(err, errIndisponible) && a.SondesKO >= r.cfg.IndispoMax {
+					delete(r.etat.Admis, adresse)
+					r.etat.Evinces[adresse] = maintenant
+					change = true
+				}
+			} else if len(douteux) > 0 {
+				a.Doutes = ajouterDoutes(a.Doutes, douteux, maintenant)
+				if len(a.Doutes) >= r.cfg.DoutesMax {
 					delete(r.etat.Admis, adresse)
 					r.etat.Evinces[adresse] = maintenant
 					change = true
@@ -442,13 +510,16 @@ func (r *registre) instantane() etat {
 	for k, v := range r.etat.Candidats {
 		c := *v
 		// /etat est public (relecture du 23/11) : ni le contact du bénévole,
-		// ni le défi (il ne sert qu'au nœud qui s'inscrit).
+		// ni le défi (il ne sert qu'au nœud qui s'inscrit), ni les empreintes
+		// des domaines de sondage.
 		c.Contact = ""
 		c.Defi = ""
+		c.Doutes = nil
 		copie.Candidats[k] = &c
 	}
 	for k, v := range r.etat.Admis {
 		a := *v
+		a.Doutes = nil
 		copie.Admis[k] = &a
 	}
 	for k, v := range r.etat.Evinces {

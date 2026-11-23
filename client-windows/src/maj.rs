@@ -72,6 +72,9 @@ struct Etat {
     version: i64,
     #[serde(default)]
     cle: String,
+    // Dernière version dont le service n'a pas redémarré : ne pas la retenter.
+    #[serde(default)]
+    rejetee: i64,
 }
 
 /// Vue minimale de l'état pour la liste d'adresses : la clé courante après
@@ -215,6 +218,12 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
         tordns_manifeste::maintenant(),
     )
     .map_err(|e| e.to_string())?;
+    if m.version == etat.rejetee {
+        return Err(format!(
+            "v{} déjà rejetée par le service : pas de nouvelle tentative",
+            m.version
+        ));
+    }
 
     let cible = m
         .cibles
@@ -270,10 +279,16 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
         .map_err(|e| format!("installation de {} : {e}", c.installateur.display()))?;
 
     if let Err(e) = hote.lancer(&c.installateur) {
-        return retour_arriere(c, hote, &e);
+        return retour_arriere(c, hote, &etat, m.version, &e);
     }
     if !hote.service_actif() {
-        return retour_arriere(c, hote, "le service TorDNS ne redémarre pas");
+        return retour_arriere(
+            c,
+            hote,
+            &etat,
+            m.version,
+            "le service TorDNS ne redémarre pas",
+        );
     }
 
     // Le manifeste et sa signature sont conservés pour la liste d'adresses :
@@ -286,6 +301,7 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
     let mut nouvel = Etat {
         version: m.version,
         cle: etat.cle,
+        rejetee: 0,
     };
     if !m.cle_suivante.is_empty() {
         nouvel.cle = m.cle_suivante;
@@ -295,13 +311,35 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
     Ok(())
 }
 
-fn retour_arriere(c: &ConfigMaj, hote: &dyn Hote, cause: &str) -> Result<(), String> {
+fn retour_arriere(
+    c: &ConfigMaj,
+    hote: &dyn Hote,
+    etat: &Etat,
+    version: i64,
+    cause: &str,
+) -> Result<(), String> {
     println!("Mise à jour refusée ({cause}) : retour à l'installateur précédent.");
-    hote.lancer(&c.cache)
-        .map_err(|e| format!("retour arrière impossible : {e} (cause : {cause})"))?;
-    if !hote.service_actif() {
+    let lancement = hote.lancer(&c.cache);
+    let actif = lancement.is_ok() && hote.service_actif();
+    // Retenir le rejet même si le retour arrière échoue : réinstaller la même
+    // version cassée ne peut pas rétablir le service.
+    let rejet = Etat {
+        version: etat.version,
+        cle: etat.cle.clone(),
+        rejetee: version,
+    };
+    let ecriture = ecrire_etat(&c.etat, &rejet);
+    if let Err(e) = lancement {
+        return Err(format!("retour arrière impossible : {e} (cause : {cause})"));
+    }
+    if !actif {
         return Err(format!(
             "l'ancienne version ne redémarre pas non plus (cause : {cause})"
+        ));
+    }
+    if let Err(e) = ecriture {
+        return Err(format!(
+            "version précédente rétablie mais état non écrit : {e} (cause : {cause})"
         ));
     }
     Err(format!("mise à jour rejetée, version précédente rétablie : {cause}"))
@@ -481,11 +519,43 @@ mod tests {
         let source = source_signee(&c, &cle, 2, b"nouveau", false);
         let err = appliquer(&c, &source, &hote).unwrap_err();
         assert!(err.contains("version précédente rétablie"), "{err}");
-        let lancements = hote.lancements.borrow();
-        assert_eq!(lancements.len(), 2);
-        assert_eq!(lancements[0], c.installateur);
-        assert_eq!(lancements[1], c.cache);
-        assert_eq!(lire_etat(&c.etat).unwrap().version, 0);
+        {
+            let lancements = hote.lancements.borrow();
+            assert_eq!(lancements.len(), 2);
+            assert_eq!(lancements[0], c.installateur);
+            assert_eq!(lancements[1], c.cache);
+        }
+        let etat = lire_etat(&c.etat).unwrap();
+        assert_eq!(etat.version, 0);
+        assert_eq!(etat.rejetee, 2);
+        // Second passage : la v2 rejetée ne doit pas relancer l'installateur.
+        let err = appliquer(&c, &source, &hote).unwrap_err();
+        assert!(err.contains("déjà rejetée"), "{err}");
+        assert_eq!(hote.lancements.borrow().len(), 2);
+    }
+
+    #[test]
+    fn version_rejetee_puis_v3_saine() {
+        let (c, cle) = preparer(3);
+        ecrire_etat(
+            &c.etat,
+            &Etat {
+                version: 1,
+                cle: String::new(),
+                rejetee: 2,
+            },
+        )
+        .unwrap();
+        let source = source_signee(&c, &cle, 3, b"nouveau v3", false);
+        let hote = FauxHote {
+            actif: Cell::new(true),
+            ..FauxHote::default()
+        };
+        appliquer(&c, &source, &hote).unwrap();
+        let etat = lire_etat(&c.etat).unwrap();
+        assert_eq!(etat.version, 3);
+        assert_eq!(etat.rejetee, 0);
+        assert_eq!(fs::read(&c.installateur).unwrap(), b"nouveau v3");
     }
 
     #[test]
@@ -531,6 +601,7 @@ mod tests {
             &Etat {
                 version: 3,
                 cle: "ab".into(),
+                rejetee: 0,
             },
         )
         .unwrap();

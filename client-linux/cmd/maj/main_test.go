@@ -153,6 +153,37 @@ func TestClientSystemdEchoueRetourArriere(t *testing.T) {
 	if etat.Version != 0 {
 		t.Fatalf("état avancé malgré l'échec : %+v", etat)
 	}
+	if etat.Rejetee != 2 {
+		t.Fatalf("version rejetée non retenue : %+v", etat)
+	}
+	// Second passage du minuteur : la même v2 ne doit pas être retentée.
+	appels = 0
+	err := b.updater(clientDirect(t, b), faux).executer()
+	if err == nil || !strings.Contains(err.Error(), "déjà rejetée") {
+		t.Fatalf("v2 cassée retentée : %v", err)
+	}
+	if appels != 0 {
+		t.Fatalf("service redémarré pour une version rejetée : %d appels", appels)
+	}
+}
+
+func TestClientVersionRejeteePuisV3(t *testing.T) {
+	v3 := []byte("binaire v3")
+	b := nouveauBanc(t, 3, v3, time.Now().Add(24*time.Hour))
+	if err := ecrireEtat(b.cfg.Etat, Etat{Version: 1, Rejetee: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.updater(clientDirect(t, b), func(string, ...string) error { return nil }).executer(); err != nil {
+		t.Fatalf("v3 refusée après rejet de v2 : %v", err)
+	}
+	etat, _ := lireEtat(b.cfg.Etat)
+	if etat.Version != 3 || etat.Rejetee != 0 {
+		t.Fatalf("état v3 incorrect : %+v", etat)
+	}
+	lu, _ := os.ReadFile(b.binaire)
+	if string(lu) != "binaire v3" {
+		t.Fatalf("binaire v3 non installé : %q", lu)
+	}
 }
 
 func TestClientManifesteAltereRefuse(t *testing.T) {

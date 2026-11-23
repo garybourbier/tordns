@@ -45,14 +45,14 @@ func requeteA(nom string) ([]byte, error) {
 		m = append(m, byte(len(etiquette)))
 		m = append(m, etiquette...)
 	}
-	m = append(m, 0)                            // fin du nom
-	m = append(m, 0, 1)                         // QTYPE A
-	m = append(m, 0, 1)                         // QCLASS IN
-	m = append(m, 0)                            // OPT : nom racine
-	m = append(m, 0, 41)                        // TYPE OPT
-	m = append(m, 0x10, 0x00)                   // UDP payload 4096
-	m = append(m, 0, 0, 0x80, 0)                // TTL, bit DO
-	m = append(m, 0, 0)                         // RDLEN
+	m = append(m, 0)             // fin du nom
+	m = append(m, 0, 1)          // QTYPE A
+	m = append(m, 0, 1)          // QCLASS IN
+	m = append(m, 0)             // OPT : nom racine
+	m = append(m, 0, 41)         // TYPE OPT
+	m = append(m, 0x10, 0x00)    // UDP payload 4096
+	m = append(m, 0, 0, 0x80, 0) // TTL, bit DO
+	m = append(m, 0, 0)          // RDLEN
 	return m, nil
 }
 
@@ -82,9 +82,9 @@ func lireNom(msg []byte, debut int) (int, error) {
 }
 
 // lireEntete lit l'en-tête, le RCODE, le bit AD et les enregistrements A de la
-// réponse. Comparer les adresses A à la référence empêche un nœud de renvoyer
-// une fausse réponse avec AD=1. Les zones de la liste doivent être stables
-// (sans CDN géographique), sinon la comparaison échouerait légitimement.
+// réponse. Une intersection d'adresses suffit : un CDN peut renvoyer un autre
+// ensemble. Une réponse signée dont les adresses sont disjointes de la
+// référence reste un mensonge, car elle prétend valider une autre donnée.
 func lireEntete(reponse []byte) (resultatDNS, error) {
 	if len(reponse) < 12 {
 		return resultatDNS{}, errReponseDNS

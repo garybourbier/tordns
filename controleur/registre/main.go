@@ -34,6 +34,7 @@ func main() {
 	sondesMin := flag.Int("sondes-min", 2, "sondes réussies minimum avant admission")
 	domainesParPasse := flag.Int("domaines-par-passe", 3, "domaines tirés au hasard à chaque passe")
 	echecsMax := flag.Int("echecs-max", 1, "mensonges DNSSEC avant éviction")
+	doutesMax := flag.Int("doutes-max", 3, "écarts non signés sur des domaines distincts avant éviction")
 	indispoMax := flag.Int("indispo-max", 6, "échecs réseau consécutifs avant éviction")
 	maxJour := flag.Int("max-jour", 50, "inscriptions acceptées par jour")
 	maxIP := flag.Int("max-ip", 3, "inscriptions acceptées par source et par jour")
@@ -71,6 +72,7 @@ func main() {
 	cfg := config{
 		Quarantaine:         *quarantaine,
 		EchecsMax:           *echecsMax,
+		DoutesMax:           *doutesMax,
 		IndispoMax:          *indispoMax,
 		SondesMin:           *sondesMin,
 		MaxInscriptionsJour: *maxJour,

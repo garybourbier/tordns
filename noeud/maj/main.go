@@ -32,6 +32,9 @@ type Etat struct {
 	Version int64             `json:"version"`
 	Images  map[string]string `json:"images"`
 	Cle     string            `json:"cle,omitempty"`
+	// Rejetee retient la dernière version dont la sonde de santé a échoué :
+	// le minuteur ne doit pas réappliquer la même version cassée.
+	Rejetee int64 `json:"rejetee,omitempty"`
 }
 
 // Config rassemble les chemins et l'horloge, injectables dans les tests.
@@ -153,6 +156,9 @@ func (u *maj) executer() error {
 	if err != nil {
 		return err
 	}
+	if m.Version == etat.Rejetee {
+		return fmt.Errorf("v%d déjà rejetée par la sonde : pas de nouvelle tentative", m.Version)
+	}
 	if len(m.Images) == 0 {
 		return errors.New("manifeste sans image de nœud : rien à appliquer")
 	}
@@ -171,6 +177,13 @@ func (u *maj) executer() error {
 		}
 		if errAr := u.sonder(); errAr != nil {
 			return fmt.Errorf("la version précédente ne répond pas non plus : %w", errAr)
+		}
+		// Retenir le rejet avant de rendre la main : la même version cassée ne
+		// doit pas être réappliquée au prochain passage du minuteur.
+		rejet := etat
+		rejet.Rejetee = m.Version
+		if errAr := ecrireEtat(u.cfg.Etat, rejet); errAr != nil {
+			return fmt.Errorf("v%d rejetée, v%d rétablie, mais état non écrit : %w", m.Version, etat.Version, errAr)
 		}
 		return fmt.Errorf("v%d rejetée par la sonde, v%d rétablie", m.Version, etat.Version)
 	}

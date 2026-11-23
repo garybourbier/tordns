@@ -27,6 +27,9 @@ import (
 type Etat struct {
 	Version int64  `json:"version"`
 	Cle     string `json:"cle,omitempty"`
+	// Rejetee retient la dernière version dont le binaire a été refusé par le
+	// service : le minuteur ne doit pas réinstaller la même version cassée.
+	Rejetee int64 `json:"rejetee,omitempty"`
 }
 
 type Config struct {
@@ -145,6 +148,9 @@ func (u *maj) executer() error {
 	if err != nil {
 		return err
 	}
+	if m.Version == etat.Rejetee {
+		return fmt.Errorf("v%d déjà rejetée par le service : pas de nouvelle tentative", m.Version)
+	}
 	cible, ok := m.Cibles[u.cfg.Cible]
 	if !ok {
 		return fmt.Errorf("cible %q absente du manifeste", u.cfg.Cible)
@@ -172,6 +178,11 @@ func (u *maj) executer() error {
 		}
 		if errAr := u.redemarrer(); errAr != nil {
 			return fmt.Errorf("l'ancien binaire ne redémarre pas non plus : %w", errAr)
+		}
+		// Retenir le rejet avant de rendre la main : au prochain passage du
+		// minuteur, la même version ne doit pas couper le service à nouveau.
+		if errAr := ecrireEtat(u.cfg.Etat, Etat{Version: etat.Version, Cle: etat.Cle, Rejetee: m.Version}); errAr != nil {
+			return fmt.Errorf("v%d rejetée, version précédente rétablie, mais état non écrit : %w", m.Version, errAr)
 		}
 		return fmt.Errorf("v%d rejetée par le service, version précédente rétablie", m.Version)
 	}

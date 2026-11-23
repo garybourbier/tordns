@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -33,18 +34,32 @@ func reponseFactice(rcode uint16, ad bool) []byte {
 	return append(brut, question...)
 }
 
+// reponseA construit une réponse avec les adresses A fournies.
+func reponseA(rcode uint16, ad bool, ips ...string) []byte {
+	brut := reponseFactice(rcode, ad)
+	binary.BigEndian.PutUint16(brut[6:8], uint16(len(ips)))
+	for _, ip := range ips {
+		adresse := net.ParseIP(ip).To4()
+		if adresse == nil {
+			panic("adresse IPv4 de test invalide")
+		}
+		reponse := []byte{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4}
+		reponse = append(reponse, adresse...)
+		brut = append(brut, reponse...)
+	}
+	return brut
+}
+
 // reponseFausseA renvoie AD=1 mais une adresse inventée : c'est exactement le
 // mensonge qu'une comparaison du seul bit AD laisserait passer.
 func reponseFausseA() []byte {
-	brut := reponseFactice(0, true)
-	brut[7] = 1 // ANCOUNT
-	reponse := []byte{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 9}
-	return append(brut, reponse...)
+	return reponseA(0, true, "203.0.113.9")
 }
 
 type fauxNoeud struct {
 	serveur  *httptest.Server
 	defi     atomic.Value
+	fixe     atomic.Value
 	menteur  atomic.Bool
 	fausseIP atomic.Bool
 }
@@ -63,6 +78,11 @@ func nouveauFauxNoeud(t *testing.T) *fauxNoeud {
 		_, _ = w.Write([]byte(defi + "\n"))
 	})
 	mux.HandleFunc("/dns-query", func(w http.ResponseWriter, r *http.Request) {
+		if v := n.fixe.Load(); v != nil {
+			w.Header().Set("Content-Type", "application/dns-message")
+			_, _ = w.Write(v.([]byte))
+			return
+		}
 		if n.menteur.Load() {
 			// Réponse signée correcte mais sans AD : mensonge DNSSEC.
 			w.Header().Set("Content-Type", "application/dns-message")
@@ -89,6 +109,11 @@ func (n *fauxNoeud) adresse() string { return strings.TrimPrefix(n.serveur.URL, 
 // NOERROR + AD : la référence des tests.
 func nouveauFauxReference(t *testing.T) string {
 	t.Helper()
+	return nouveauFauxReferenceAvec(t, reponseFactice(0, true))
+}
+
+func nouveauFauxReferenceAvec(t *testing.T, rep []byte) string {
+	t.Helper()
 	ecoute, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +135,6 @@ func nouveauFauxReference(t *testing.T) string {
 				if _, err := io.ReadFull(c, q); err != nil {
 					return
 				}
-				rep := reponseFactice(0, true)
 				binary.BigEndian.PutUint16(taille[:], uint16(len(rep)))
 				_, _ = c.Write(append(taille[:], rep...))
 			}(conn)
@@ -280,6 +304,105 @@ func TestPagePubliqueEtAPI(t *testing.T) {
 	// L'API d'état ne doit pas divulguer les défis des candidats.
 	if strings.Contains(mustJSON(t, e), "defi") {
 		t.Fatal("l'état public expose un défi")
+	}
+}
+
+// Relecture du 23/11 : un CDN ou un tourniquet peut renvoyer un autre ensemble
+// d'adresses ; seule une intersection vide est suspecte.
+func TestSondeTourniquetIntersection(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.Reference = nouveauFauxReferenceAvec(t, reponseA(0, true, "192.0.2.1", "192.0.2.2"))
+	n := nouveauFauxNoeud(t)
+	n.fixe.Store(reponseA(0, true, "192.0.2.2", "192.0.2.3"))
+	douteux, err := r.sonder(n.adresse(), []string{"exemple.test"})
+	if err != nil || len(douteux) != 0 {
+		t.Fatalf("tourniquet refusé : douteux=%v err=%v", douteux, err)
+	}
+}
+
+func TestAdresseInventeeSurZoneSigneeEstMensonge(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.Reference = nouveauFauxReferenceAvec(t, reponseA(0, true, "192.0.2.1"))
+	n := nouveauFauxNoeud(t)
+	n.fixe.Store(reponseA(0, true, "192.0.2.9"))
+	if _, err := r.sonder(n.adresse(), []string{"exemple.test"}); !errors.Is(err, errMensonge) {
+		t.Fatalf("adresse inventée acceptée : %v", err)
+	}
+}
+
+func TestDnssecFailedResoluEstMensonge(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.Reference = nouveauFauxReferenceAvec(t, reponseFactice(2, false))
+	n := nouveauFauxNoeud(t)
+	n.fixe.Store(reponseFactice(0, false))
+	if _, err := r.sonder(n.adresse(), []string{"dnssec-failed.org"}); !errors.Is(err, errMensonge) {
+		t.Fatalf("dnssec-failed.org résolu accepté : %v", err)
+	}
+}
+
+// N écarts non signés sur des domaines distincts disqualifient ; en dessous du
+// seuil, le candidat reste en quarantaine et n'est pas admis.
+func TestDouteuxNEvineQuApresNDomaines(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.Reference = nouveauFauxReferenceAvec(t, reponseA(0, false, "192.0.2.1"))
+	r.cfg.Domaines = []string{"un.test", "deux.test", "trois.test"}
+	r.cfg.DomainesParPasse = 3
+	r.cfg.DoutesMax = 4
+	n := nouveauFauxNoeud(t)
+	n.fixe.Store(reponseA(0, false, "192.0.2.9"))
+	inscrireEtConfirmer(t, r, n)
+
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	c := r.etat.Candidats[n.adresse()]
+	if c == nil || len(c.Doutes) != 3 || c.SondesOK != 0 {
+		r.mu.Unlock()
+		t.Fatalf("doutes mal comptés : %+v", c)
+	}
+	if len(r.etat.Admis) != 0 {
+		r.mu.Unlock()
+		t.Fatal("candidat admis malgré les doutes")
+	}
+	r.mu.Unlock()
+
+	r.cfg.DoutesMax = 3
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.etat.Candidats[n.adresse()]; ok {
+		t.Fatal("candidat toujours présent après N domaines distincts")
+	}
+}
+
+// Un nœud admis qui accumule N doutes non signés sur des domaines distincts
+// est évincé, sans attendre un mensonge signé.
+func TestDouteuxEvinceUnAdmis(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	n := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n)
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+
+	r.cfg.Reference = nouveauFauxReferenceAvec(t, reponseA(0, false, "192.0.2.1"))
+	r.cfg.Domaines = []string{"un.test", "deux.test", "trois.test"}
+	r.cfg.DomainesParPasse = 3
+	r.cfg.DoutesMax = 3
+	n.fixe.Store(reponseA(0, false, "192.0.2.9"))
+	change, err := r.passe()
+	if err != nil || !change {
+		t.Fatalf("éviction des doutes : change=%v err=%v", change, err)
+	}
+	e := r.instantane()
+	if _, ok := e.Admis[n.adresse()]; ok {
+		t.Fatal("nœud douteux toujours admis")
+	}
+	if _, ok := e.Evinces[n.adresse()]; !ok {
+		t.Fatal("nœud douteux non évincé")
 	}
 }
 
