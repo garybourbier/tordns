@@ -43,9 +43,9 @@ func reponseFausseA() []byte {
 }
 
 type fauxNoeud struct {
-	serveur *httptest.Server
-	defi    atomic.Value
-	menteur atomic.Bool
+	serveur  *httptest.Server
+	defi     atomic.Value
+	menteur  atomic.Bool
 	fausseIP atomic.Bool
 }
 
@@ -339,4 +339,38 @@ func TestRequeteDNS(t *testing.T) {
 		t.Fatalf("en-tête mal lu : %+v", res)
 	}
 	_ = base64.RawURLEncoding
+}
+
+// Relecture Claude du 23/11 : /etat est public ; le contact d'un bénévole et
+// le défi d'un candidat n'y figurent jamais (l'ancien test ne regardait l'état
+// qu'après admission, quand il n'y avait plus aucun candidat).
+func TestEtatPublicSansContactNiDefi(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	n := nouveauFauxNoeud(t)
+	c, err := r.inscrire(n.adresse(), "benevole@exemple.invalid", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := httptest.NewServer(r.routes())
+	defer s.Close()
+	rep, err := http.Get(s.URL + "/etat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	brut, _ := io.ReadAll(rep.Body)
+	rep.Body.Close()
+	texte := string(brut)
+	if !strings.Contains(texte, n.adresse()) {
+		t.Fatalf("candidat absent de l'état : %s", texte)
+	}
+	if strings.Contains(texte, "benevole@exemple.invalid") || strings.Contains(texte, c.Defi) {
+		t.Fatalf("l'état public expose le contact ou le défi : %s", texte)
+	}
+	// L'état interne, lui, garde le contact (pour joindre le bénévole).
+	r.mu.Lock()
+	garde := r.etat.Candidats[n.adresse()].Contact
+	r.mu.Unlock()
+	if garde != "benevole@exemple.invalid" {
+		t.Fatalf("contact perdu dans l'état interne : %q", garde)
+	}
 }

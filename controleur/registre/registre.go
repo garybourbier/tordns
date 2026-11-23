@@ -441,6 +441,10 @@ func (r *registre) instantane() etat {
 	}
 	for k, v := range r.etat.Candidats {
 		c := *v
+		// /etat est public (relecture du 23/11) : ni le contact du bénévole,
+		// ni le défi (il ne sert qu'au nœud qui s'inscrit).
+		c.Contact = ""
+		c.Defi = ""
 		copie.Candidats[k] = &c
 	}
 	for k, v := range r.etat.Admis {
