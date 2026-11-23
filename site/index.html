@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TorDNS — un DNS privé, sans mensonge</title>
+<meta name="description" content="TorDNS relaie vos requêtes DNS par Tor vers un réseau de nœuds bénévoles, avec DNSSEC, cache borné et mise à jour signée. Clients Windows, macOS, Linux et Android.">
+<link rel="stylesheet" href="style.css">
+<script src="surbrillance.js" defer></script>
+</head>
+<body>
+<a class="evitement" href="#contenu">Aller au contenu</a>
+<header>
+  <nav aria-label="Navigation principale">
+    <a class="marque" href="index.html">TorDNS</a>
+    <ul>
+      <li><a href="#comment">Comment ça marche</a></li>
+      <li><a href="#telechargements">Téléchargements</a></li>
+      <li><a href="#noeud">Héberger un nœud</a></li>
+      <li><a href="#limites">Limites</a></li>
+      <li><a href="en/index.html" lang="en" hreflang="en">English</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="contenu">
+  <section class="hero" aria-labelledby="titre">
+    <p class="etiquette">DNS privé, vérifiable, communautaire</p>
+    <h1 id="titre">Un DNS qui ne vous ment pas.</h1>
+    <p class="chapeau">TorDNS chiffre vos requêtes DNS dans Tor et les confie à un réseau de nœuds bénévoles. Vos résolveurs locaux, votre fournisseur d’accès et les réseaux Wi-Fi ne voient plus les noms que vous visitez. Un cache borné, DNSSEC et des mises à jour signées complètent le dispositif.</p>
+    <p class="actions">
+      <a class="bouton" href="#telechargements">Télécharger TorDNS</a>
+      <a class="lien-discret" href="#comment">Comprendre en une minute</a>
+    </p>
+  </section>
+
+  <section aria-labelledby="pour-qui">
+    <h2 id="pour-qui">Pour qui, et contre quoi ?</h2>
+    <div class="grille">
+      <article class="carte">
+        <h3>Censure</h3>
+        <p>Quand un réseau bloque ou détourne les résolveurs publics, TorDNS passe par Tor et rend la résolution à un nœud choisi par la communauté.</p>
+      </article>
+      <article class="carte">
+        <h3>DNS menteurs</h3>
+        <p>Les réponses DNSSEC sont vérifiées côté client. Une signature absente ou invalide est refusée plutôt que servie silencieusement.</p>
+      </article>
+      <article class="carte">
+        <h3>Vie privée</h3>
+        <p>Aucun journal de requêtes sur les nœuds, aucun traceur sur cette page. Le cache est borné et les compteurs sont agrégés.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="comment" aria-labelledby="titre-comment">
+    <h2 id="titre-comment">Comment ça marche</h2>
+    <figure class="schema">
+      <svg viewBox="0 0 920 250" role="img" aria-labelledby="schema-titre schema-desc">
+        <title id="schema-titre">Chemin d’une requête DNS TorDNS</title>
+        <desc id="schema-desc">Le client interroge Tor, qui joint une adresse cœur ou communautaire ; le nœud choisi résout avec Unbound et DNSSEC, puis la réponse revient au client.</desc>
+        <rect x="10" y="85" width="150" height="80" rx="12" class="bloc"></rect>
+        <text x="85" y="120" text-anchor="middle" class="bloc-titre">Client</text>
+        <text x="85" y="145" text-anchor="middle" class="bloc-texte">DNS local</text>
+        <line x1="160" y1="125" x2="235" y2="125" class="fleche"></line>
+        <polygon points="235,125 220,117 220,133" class="pointe"></polygon>
+        <rect x="240" y="85" width="150" height="80" rx="12" class="bloc"></rect>
+        <text x="315" y="120" text-anchor="middle" class="bloc-titre">Tor</text>
+        <text x="315" y="145" text-anchor="middle" class="bloc-texte">circuit chiffré</text>
+        <line x1="390" y1="125" x2="465" y2="125" class="fleche"></line>
+        <polygon points="465,125 450,117 450,133" class="pointe"></polygon>
+        <rect x="470" y="75" width="180" height="100" rx="12" class="bloc"></rect>
+        <text x="560" y="110" text-anchor="middle" class="bloc-titre">Cœur / communauté</text>
+        <text x="560" y="135" text-anchor="middle" class="bloc-texte">.onion public</text>
+        <text x="560" y="155" text-anchor="middle" class="bloc-texte">nœuds bénévoles</text>
+        <line x1="650" y1="125" x2="725" y2="125" class="fleche"></line>
+        <polygon points="725,125 710,117 710,133" class="pointe"></polygon>
+        <rect x="730" y="80" width="180" height="90" rx="12" class="bloc"></rect>
+        <text x="820" y="115" text-anchor="middle" class="bloc-titre">Unbound</text>
+        <text x="820" y="140" text-anchor="middle" class="bloc-texte">racines + DNSSEC</text>
+      </svg>
+      <figcaption>Le client ne contacte jamais un résolveur en clair : il parle à Tor, qui joint l’adresse .onion du réseau. Le nœud résout avec Unbound et renvoie une réponse vérifiée.</figcaption>
+    </figure>
+  </section>
+
+  <section id="telechargements" aria-labelledby="titre-telechargements">
+    <h2 id="titre-telechargements">Téléchargements</h2>
+    <p>Version 0.8.0. Les liens pointent vers la dernière release GitHub. Vérifiez le fichier avec <a href="https://github.com/garybourbier/tordns/releases/latest/download/SHA256SUMS">SHA256SUMS</a> et, quand elle est disponible, l’attestation de provenance :</p>
+    <pre><code>gh attestation verify &lt;fichier&gt; --repo garybourbier/tordns</code></pre>
+
+    <h3>Windows</h3>
+    <div class="grille">
+      <article class="carte" data-plateforme="windows">
+        <h4>Windows x64</h4>
+        <p>Installateur pour PC Intel ou AMD.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-windows-x86_64-setup.exe" title="tordns-client-0.8.0-windows-x86_64-setup.exe">Télécharger pour Windows x64</a>
+      </article>
+      <article class="carte" data-plateforme="windows">
+        <h4>Windows ARM</h4>
+        <p>Installateur pour PC Windows on ARM.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-windows-aarch64-setup.exe" title="tordns-client-0.8.0-windows-aarch64-setup.exe">Télécharger pour Windows ARM</a>
+      </article>
+    </div>
+
+    <h3>macOS</h3>
+    <div class="grille">
+      <article class="carte" data-plateforme="mac">
+        <h4>macOS universel</h4>
+        <p>Intel et Apple Silicon. Le paquet installe le service launchd.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-macos-universel.pkg" title="tordns-client-0.8.0-macos-universel.pkg">Télécharger le paquet macOS</a>
+        <a class="lien-discret" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-macos-universel" title="tordns-client-0.8.0-macos-universel">Binaire seul</a>
+      </article>
+    </div>
+
+    <h3>Linux</h3>
+    <div class="grille">
+      <article class="carte" data-plateforme="linux">
+        <h4>Linux amd64</h4>
+        <p>Archive statique et paquet Debian/Ubuntu.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-amd64.tar.gz" title="tordns-client-0.8.0-linux-amd64.tar.gz">Télécharger l’archive amd64</a>
+        <a class="lien-discret" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-amd64.deb" title="tordns-client-0.8.0-linux-amd64.deb">Paquet .deb amd64</a>
+      </article>
+      <article class="carte" data-plateforme="linux">
+        <h4>Linux arm64</h4>
+        <p>Archive statique et paquet Debian/Ubuntu.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-arm64.tar.gz" title="tordns-client-0.8.0-linux-arm64.tar.gz">Télécharger l’archive arm64</a>
+        <a class="lien-discret" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-arm64.deb" title="tordns-client-0.8.0-linux-arm64.deb">Paquet .deb arm64</a>
+      </article>
+      <article class="carte" data-plateforme="linux">
+        <h4>Linux armv7</h4>
+        <p>Archive statique pour Raspberry Pi et systèmes 32 bits.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-armv7.tar.gz" title="tordns-client-0.8.0-linux-armv7.tar.gz">Télécharger l’archive armv7</a>
+      </article>
+    </div>
+
+    <h3>Android</h3>
+    <div class="grille">
+      <article class="carte" data-plateforme="android">
+        <h4>Android universel</h4>
+        <p>Un APK pour toutes les ABI. Plus lourd, plus simple.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-universel.apk" title="tordns-client-0.8.0-android-universel.apk">Télécharger l’APK universel</a>
+      </article>
+      <article class="carte" data-plateforme="android">
+        <h4>Android arm64-v8a</h4>
+        <p>Téléphones et tablettes récents.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-arm64-v8a.apk" title="tordns-client-0.8.0-android-arm64-v8a.apk">Télécharger l’APK arm64</a>
+      </article>
+      <article class="carte" data-plateforme="android">
+        <h4>Android armeabi-v7a</h4>
+        <p>Appareils Android 32 bits.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-armeabi-v7a.apk" title="tordns-client-0.8.0-android-armeabi-v7a.apk">Télécharger l’APK armv7</a>
+      </article>
+      <article class="carte" data-plateforme="android">
+        <h4>Android x86_64</h4>
+        <p>Émulateurs et appareils Intel.</p>
+        <a class="bouton" href="https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-x86_64.apk" title="tordns-client-0.8.0-android-x86_64.apk">Télécharger l’APK x86_64</a>
+      </article>
+    </div>
+  </section>
+
+  <section id="noeud" aria-labelledby="titre-noeud">
+    <h2 id="titre-noeud">Héberger un nœud</h2>
+    <p>Un nœud est un petit VPS ou une machine chez vous. Il sert un service caché Tor et ne publie aucun port sur Internet. Comptez environ 1 Go de RAM.</p>
+    <pre><code>git clone https://github.com/garybourbier/tordns.git &amp;&amp; cd tordns &amp;&amp; sudo ./noeud/installer.sh</code></pre>
+    <p>Pour utiliser les images multi-arch publiées sur GHCR, placez <code>images.txt</code> à côté de <code>noeud/</code> puis ajoutez <code>--images ghcr</code> : chaque image est épinglée par son empreinte <code>@sha256</code>. Sans cette option, les images sont construites localement.</p>
+    <ul>
+      <li><strong>Cœur</strong> : le service caché public de référence, maintenu par le projet.</li>
+      <li><strong>Communauté</strong> : des instances admises après des sondes de disponibilité et de non-mensonge.</li>
+      <li><a href="https://github.com/garybourbier/tordns/blob/master/noeud/README.md">Guide d’installation du nœud</a> et <a href="https://github.com/garybourbier/tordns/pkgs/container/tordns-serveur-unbound">images GHCR</a>.</li>
+    </ul>
+  </section>
+
+  <section id="limites" aria-labelledby="titre-limites">
+    <h2 id="titre-limites">Sécurité et limites, sans promesse excessive</h2>
+    <div class="grille">
+      <article class="carte">
+        <h3>Ce qui est vérifié</h3>
+        <p>Les binaires sont construits par la CI depuis le dépôt, les sommes et les attestations sont publiées, le manifeste de mise à jour est signé en Ed25519 et les réponses DNSSEC sont contrôlées côté client.</p>
+      </article>
+      <article class="carte">
+        <h3>Ce qui ne l’est pas</h3>
+        <p>Le projet n’a pas fait l’objet d’un audit indépendant. Un bénévole qui exploite un nœud peut journaliser les requêtes qu’il reçoit. Tor protège le lien réseau, pas un nœud malveillant.</p>
+      </article>
+      <article class="carte">
+        <h3>Vos responsabilités</h3>
+        <p>DNSSEC dépend de la zone interrogée. Un domaine sans DNSSEC reste vulnérable au mensonge du résolveur. TorDNS réduit la fuite DNS, il ne rend pas votre navigateur anonyme à lui seul.</p>
+      </article>
+    </div>
+    <p>Pour signaler une faille, utilisez le <a href="https://github.com/garybourbier/tordns/security/advisories/new">signalement privé GitHub</a>, jamais une issue publique. Voir <a href="https://github.com/garybourbier/tordns/blob/master/SECURITY.md">SECURITY.md</a>.</p>
+  </section>
+
+  <section aria-labelledby="titre-source">
+    <h2 id="titre-source">Code source, licence, contribution</h2>
+    <p>TorDNS est un logiciel libre sous <a href="https://github.com/garybourbier/tordns/blob/master/LICENSE">licence MIT</a>. Le code, les missions et les preuves sont dans le <a href="https://github.com/garybourbier/tordns">dépôt GitHub</a>. Les retours et les correctifs passent par les <a href="https://github.com/garybourbier/tordns/issues">issues</a> ; les contributions doivent rester sans secret, sans adresse .onion réelle et avec leurs preuves exécutables.</p>
+  </section>
+</main>
+
+<footer>
+  <p>TorDNS — logiciel libre, sans traceur, sans cookie, sans police distante.</p>
+  <p><a href="https://github.com/garybourbier/tordns">Code source</a> · <a href="https://github.com/garybourbier/tordns/blob/master/LICENSE">MIT</a> · <a href="en/index.html" lang="en" hreflang="en">English</a></p>
+</footer>
+</body>
+</html>

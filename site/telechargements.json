@@ -1,0 +1,98 @@
+{
+  "version": "0.8.0",
+  "release_base": "https://github.com/garybourbier/tordns/releases/latest/download/",
+  "sommes": "SHA256SUMS",
+  "fichiers": [
+    {
+      "cle": "windows-x64",
+      "nom": "tordns-client-{version}-windows-x86_64-setup.exe",
+      "source": "dist/client-windows/x86_64/TorDNS-{version}-x86_64-setup.exe",
+      "plateforme": "Windows",
+      "architecture": "x86_64"
+    },
+    {
+      "cle": "windows-arm",
+      "nom": "tordns-client-{version}-windows-aarch64-setup.exe",
+      "source": "dist/client-windows/aarch64/TorDNS-{version}-aarch64-setup.exe",
+      "plateforme": "Windows",
+      "architecture": "aarch64"
+    },
+    {
+      "cle": "macos-universel",
+      "nom": "tordns-client-{version}-macos-universel",
+      "source": "dist/client-macos/tordns-client-darwin-universel",
+      "plateforme": "macOS",
+      "architecture": "Intel et Apple Silicon"
+    },
+    {
+      "cle": "macos-pkg",
+      "nom": "tordns-client-{version}-macos-universel.pkg",
+      "source": "dist/client-macos/TorDNS-{version}-macos-NON-SIGNE.pkg",
+      "plateforme": "macOS",
+      "architecture": "paquet non signé"
+    },
+    {
+      "cle": "linux-amd64",
+      "nom": "tordns-client-{version}-linux-amd64.tar.gz",
+      "source": "dist/client-linux/tordns-client_{version}_linux_amd64.tar.gz",
+      "plateforme": "Linux",
+      "architecture": "amd64"
+    },
+    {
+      "cle": "linux-arm64",
+      "nom": "tordns-client-{version}-linux-arm64.tar.gz",
+      "source": "dist/client-linux/tordns-client_{version}_linux_arm64.tar.gz",
+      "plateforme": "Linux",
+      "architecture": "arm64"
+    },
+    {
+      "cle": "linux-armv7",
+      "nom": "tordns-client-{version}-linux-armv7.tar.gz",
+      "source": "dist/client-linux/tordns-client_{version}_linux_armv7.tar.gz",
+      "plateforme": "Linux",
+      "architecture": "armv7"
+    },
+    {
+      "cle": "linux-amd64-deb",
+      "nom": "tordns-client-{version}-linux-amd64.deb",
+      "source": "dist/client-linux/tordns-client_{version}_amd64.deb",
+      "plateforme": "Debian/Ubuntu",
+      "architecture": "amd64"
+    },
+    {
+      "cle": "linux-arm64-deb",
+      "nom": "tordns-client-{version}-linux-arm64.deb",
+      "source": "dist/client-linux/tordns-client_{version}_arm64.deb",
+      "plateforme": "Debian/Ubuntu",
+      "architecture": "arm64"
+    },
+    {
+      "cle": "android-arm64",
+      "nom": "tordns-client-{version}-android-arm64-v8a.apk",
+      "source": "dist/client-android/tordns-client-arm64-v8a-NON-SIGNE-POUR-PUBLICATION.apk",
+      "plateforme": "Android",
+      "architecture": "arm64-v8a"
+    },
+    {
+      "cle": "android-armv7",
+      "nom": "tordns-client-{version}-android-armeabi-v7a.apk",
+      "source": "dist/client-android/tordns-client-armeabi-v7a-NON-SIGNE-POUR-PUBLICATION.apk",
+      "plateforme": "Android",
+      "architecture": "armeabi-v7a"
+    },
+    {
+      "cle": "android-x86_64",
+      "nom": "tordns-client-{version}-android-x86_64.apk",
+      "source": "dist/client-android/tordns-client-x86_64-NON-SIGNE-POUR-PUBLICATION.apk",
+      "plateforme": "Android",
+      "architecture": "x86_64"
+    },
+    {
+      "cle": "android-universel",
+      "nom": "tordns-client-{version}-android-universel.apk",
+      "source": "dist/client-android/tordns-client-universel-NON-SIGNE-POUR-PUBLICATION.apk",
+      "plateforme": "Android",
+      "architecture": "toutes ABI"
+    }
+  ]
+}

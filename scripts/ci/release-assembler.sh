@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # TorDNS — assemble les artefacts d'une release et écrit SHA256SUMS.
 #   VERSION=0.8.0 scripts/ci/release-assembler.sh v0.8.0 [dist/release/v0.8.0]
-# Les binaires sont produits par les scripts de scripts/ci/ ; ce script ne fait
-# que les renommer selon tordns-<produit>-<version>-<os>-<arch>.<ext>.
+# La liste des fichiers vient de site/telechargements.json : le site et la
+# release partagent la même source de noms.
 set -euo pipefail
 
 RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -15,47 +15,41 @@ DEST=${2:-"$RACINE/dist/release/$TAG"}
 rm -rf "$DEST"
 mkdir -p "$DEST"
 
-copier() {
-	source=$1
-	nom=$2
-	if [ ! -f "$source" ]; then
-		# GitHub Actions télécharge les artefacts avec une arborescence
-		# variable (à plat ou par architecture) : chercher le nom de base.
-		alt=$(find "$RACINE/dist" -type f -name "$(basename "$source")" | head -n 1)
-		[ -n "$alt" ] && source=$alt
-	fi
-	if [ -f "$source" ]; then
-		install -m 0644 "$source" "$DEST/$nom"
-		echo "OK : $nom"
-	else
-		echo "ERREUR : fichier attendu absent : $source" >&2
-		exit 1
-	fi
-}
+python3 - "$RACINE" "$VERSION" "$DEST" <<'PY'
+import json
+import pathlib
+import shutil
+import sys
 
-for arch in amd64 arm64 armv7; do
-	copier "$RACINE/dist/client-linux/tordns-client_${VERSION}_linux_${arch}.tar.gz" \
-		"tordns-client-${VERSION}-linux-${arch}.tar.gz"
-done
-for arch in amd64 arm64; do
-	copier "$RACINE/dist/client-linux/tordns-client_${VERSION}_${arch}.deb" \
-		"tordns-client-${VERSION}-linux-${arch}.deb"
-done
-for arch in x86_64 aarch64; do
-	copier "$RACINE/dist/client-windows/$arch/TorDNS-${VERSION}-${arch}-setup.exe" \
-		"tordns-client-${VERSION}-windows-${arch}-setup.exe"
-done
-copier "$RACINE/dist/client-macos/tordns-client-darwin-universel" \
-	"tordns-client-${VERSION}-macos-universel"
-if [ -f "$RACINE/dist/client-macos/TorDNS-${VERSION}-macos-NON-SIGNE.pkg" ]; then
-	copier "$RACINE/dist/client-macos/TorDNS-${VERSION}-macos-NON-SIGNE.pkg" \
-		"tordns-client-${VERSION}-macos-universel.pkg"
+racine = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+dest = pathlib.Path(sys.argv[3])
+liste = json.loads((racine / "site" / "telechargements.json").read_text())
+attendus = {}
+for entree in liste["fichiers"]:
+    nom = entree["nom"].replace("{version}", version)
+    source = (racine / entree["source"].replace("{version}", version))
+    if not source.is_file() and "/" in entree["source"]:
+        # Les artefacts GitHub peuvent arriver à plat ou par architecture.
+        candidats = list((racine / "dist").rglob(source.name))
+        if candidats:
+            source = candidats[0]
+    if not source.is_file():
+        sys.exit(f"ERREUR : fichier attendu absent : {source}")
+    shutil.copyfile(source, dest / nom)
+    attendus[nom] = source
+    print(f"OK : {nom}")
+if not attendus:
+    sys.exit("ERREUR : liste de téléchargements vide")
+PY
+
+if [ -f "$RACINE/dist/images.txt" ]; then
+	install -m 0644 "$RACINE/dist/images.txt" "$DEST/images.txt"
+else
+	alt=$(find "$RACINE/dist" -type f -name images.txt | head -n 1)
+	[ -n "$alt" ] || { echo "ERREUR : images.txt absent" >&2; exit 1; }
+	install -m 0644 "$alt" "$DEST/images.txt"
 fi
-for abi in arm64-v8a armeabi-v7a x86_64 universel; do
-	copier "$RACINE/dist/client-android/tordns-client-${abi}-NON-SIGNE-POUR-PUBLICATION.apk" \
-		"tordns-client-${VERSION}-android-${abi}.apk"
-done
-copier "$RACINE/dist/images.txt" "images.txt"
 
 (
 	cd "$DEST"
