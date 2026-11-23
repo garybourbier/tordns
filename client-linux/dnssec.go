@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -312,7 +313,7 @@ func (v *validateurDNSSEC) cleZone(zone string, ds []*dns.DS) ([]*dns.DNSKEY, er
 		return nil, fmt.Errorf("aucune DNSKEY de %s ne correspond au DS", zone)
 	}
 	for _, sig := range sigs {
-		if canon(sig.SignerName) != zone {
+		if canon(sig.SignerName) != zone || !sig.ValidityPeriod(time.Now()) {
 			continue
 		}
 		for _, cle := range cles {
@@ -333,6 +334,16 @@ func (v *validateurDNSSEC) cleZone(zone string, ds []*dns.DS) ([]*dns.DNSKEY, er
 }
 
 func (v *validateurDNSSEC) verifierSignature(sig *dns.RRSIG, rrset []dns.RR, cles []*dns.DNSKEY) error {
+	// Relecture du 23/11 : miekg/dns ne vérifie ni la période de validité
+	// (une vieille réponse signée se rejouerait indéfiniment) ni que le nom
+	// signé est DANS la zone signataire (il compare des suffixes de chaîne :
+	// example.test signerait badexample.test). Les deux sont faits ici.
+	if !sig.ValidityPeriod(time.Now()) {
+		return fmt.Errorf("signature %s/%d hors de sa période de validité", sig.Hdr.Name, sig.TypeCovered)
+	}
+	if len(rrset) == 0 || !dns.IsSubDomain(canon(sig.SignerName), canon(rrset[0].Header().Name)) {
+		return fmt.Errorf("signature %s/%d : signataire %s hors de la zone du nom", sig.Hdr.Name, sig.TypeCovered, sig.SignerName)
+	}
 	for _, cle := range cles {
 		if cle.KeyTag() != sig.KeyTag || cle.Algorithm != sig.Algorithm {
 			continue

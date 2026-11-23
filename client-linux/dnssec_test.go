@@ -42,14 +42,18 @@ func bytesRemplis(v byte) []byte {
 }
 
 func signer(zone zoneTest, rrset []dns.RR) *dns.RRSIG {
+	return signerEntre(zone, rrset, time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
+}
+
+func signerEntre(zone zoneTest, rrset []dns.RR, debut, fin time.Time) *dns.RRSIG {
 	sig := &dns.RRSIG{
 		Hdr:         dns.RR_Header{Name: rrset[0].Header().Name, Rrtype: dns.TypeRRSIG, Class: dns.ClassINET, Ttl: 3600},
 		TypeCovered: rrset[0].Header().Rrtype,
 		Algorithm:   dns.ED25519,
 		Labels:      uint8(dns.CountLabel(rrset[0].Header().Name)),
 		OrigTtl:     rrset[0].Header().Ttl,
-		Expiration:  uint32(time.Now().Add(24 * time.Hour).Unix()),
-		Inception:   uint32(time.Now().Add(-time.Hour).Unix()),
+		Expiration:  uint32(fin.Unix()),
+		Inception:   uint32(debut.Unix()),
 		KeyTag:      zone.cle.KeyTag(),
 		SignerName:  zone.nom,
 	}
@@ -88,6 +92,9 @@ type fauxResolveur struct {
 	injecterA            bool
 	sansDS               bool
 	mode                 string
+	// signatureA, si non nil, remplace la signature de l'enregistrement A
+	// (attaques : signature périmée, signataire voisin).
+	signatureA func(rrset []dns.RR) *dns.RRSIG
 }
 
 func (f *fauxResolveur) interroger(brut []byte) ([]byte, error) {
@@ -171,7 +178,9 @@ func (f *fauxResolveur) interroger(brut []byte) ([]byte, error) {
 		A:   []byte{192, 0, 2, 1},
 	}
 	rrset := []dns.RR{a}
-	if !f.sansDS && !strings.HasSuffix(nom, ".unsigned.example.test.") {
+	if f.signatureA != nil {
+		rep.Answer = append(rrset, f.signatureA(rrset))
+	} else if !f.sansDS && !strings.HasSuffix(nom, ".unsigned.example.test.") {
 		rep.Answer = append(rrset, signer(f.exemple, rrset))
 	} else {
 		rep.Answer = append(rep.Answer, a)
@@ -428,5 +437,37 @@ func TestDNSSECNSEC3OptOutZoneSansDS(t *testing.T) {
 	f.mode = "nsec3-optout"
 	if err := validerReponse(t, f, "www.unsigned.example.test"); !errors.Is(err, ErrZoneNonSignee) {
 		t.Fatalf("délégation opt-out sans DS : %v, ErrZoneNonSignee attendu", err)
+	}
+}
+
+// Relecture Claude du 23/11 : un nœud qui rejoue une réponse signée dont la
+// signature a expiré (ou n'est pas encore valide) ne doit pas passer.
+func TestDNSSECSignaturePerimeeRefusee(t *testing.T) {
+	f, _ := chaineDeTest(t)
+	f.signatureA = func(rrset []dns.RR) *dns.RRSIG {
+		return signerEntre(f.exemple, rrset, time.Now().Add(-60*24*time.Hour), time.Now().Add(-30*24*time.Hour))
+	}
+	if err := validerReponse(t, f, "www.example.test"); err == nil {
+		t.Fatal("signature expirée depuis 30 jours acceptée")
+	}
+	f.signatureA = func(rrset []dns.RR) *dns.RRSIG {
+		return signerEntre(f.exemple, rrset, time.Now().Add(24*time.Hour), time.Now().Add(48*time.Hour))
+	}
+	if err := validerReponse(t, f, "www.example.test"); err == nil {
+		t.Fatal("signature pas encore valide acceptée")
+	}
+}
+
+// Relecture Claude du 23/11 : miekg/dns ne compare le signataire au nom que
+// par suffixe de chaîne. La zone example.test ne doit pas pouvoir signer
+// badexample.test (une zone voisine, pas une sous-zone).
+func TestDNSSECSignataireVoisinRefuse(t *testing.T) {
+	f, _ := chaineDeTest(t)
+	f.signatureA = func(rrset []dns.RR) *dns.RRSIG { return signer(f.exemple, rrset) }
+	if err := validerReponse(t, f, "badexample.test"); err == nil {
+		t.Fatal("badexample.test signé par la zone example.test accepté")
+	}
+	if err := validerReponse(t, f, "www.example.test"); err != nil {
+		t.Fatalf("sous-domaine légitime refusé : %v", err)
 	}
 }
