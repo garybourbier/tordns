@@ -79,6 +79,7 @@ services:
       # Le cookie de contrôle est annoncé par Tor avec son chemin absolu : il
       # doit exister au même endroit ici pour que stem l'authentifie.
       - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/tor:/var/lib/tor:ro
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/run:/run/tordns
     depends_on:
       tor:
         condition: service_healthy
@@ -111,6 +112,7 @@ services:
     volumes:
       - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}:/donnees:ro
       - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/tor:/var/lib/tor:ro
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/run:/run/tordns
     depends_on:
       tor:
         condition: service_healthy
@@ -165,6 +167,16 @@ services:
       - /donnees/registre.json
       - -pool
       - /pools/communaute.txt
+      - -coeur
+      - /pools/coeur.txt
+      - -reseau
+      - /donnees/etat-reseau.json
+      - -reseau-interne
+      - /donnees/reseau-interne.json
+      - -descripteur
+      - /donnees/descripteur.date
+      - -onionbalance-status
+      - /run/tordns/onionbalance.sock
       - -domaines
       - /domaines.txt
       - -reference
@@ -176,6 +188,7 @@ services:
     volumes:
       - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/registre:/donnees
       - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/pools:/pools
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/run:/run/tordns:ro
       - ./domaines.txt:/domaines.txt:ro
     depends_on:
       tor:

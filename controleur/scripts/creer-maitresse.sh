@@ -66,9 +66,9 @@ else
 	GID_=$(id -g)
 fi
 
-mkdir -p "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools"
-chmod 0700 "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools"
-chown "$UID_:$GID_" "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools" 2>/dev/null || true
+mkdir -p "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools" "$DONNEES/run"
+chmod 0700 "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools" "$DONNEES/run"
+chown "$UID_:$GID_" "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools" "$DONNEES/run" 2>/dev/null || true
 
 ENV_FILE="$DONNEES/.env"
 cat >"$ENV_FILE" <<EOF

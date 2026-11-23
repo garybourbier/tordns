@@ -29,6 +29,11 @@ func main() {
 	ecoute := flag.String("ecoute", ":8080", "adresse d'écoute HTTP")
 	proxyProtocole := flag.Bool("proxy-protocole", true, "lire l'en-tête PROXY v2 de Tor (circuit)")
 	hook := flag.String("hook", "", "script exécuté après chaque changement du pool")
+	coeurFichier := flag.String("coeur", "", "pool cœur en lecture seule pour l'état public")
+	reseauFichier := flag.String("reseau", "", "état public du réseau (JSON agrégé ; vide : non publié)")
+	reseauInterne := flag.String("reseau-interne", "", "échantillons privés nécessaires aux agrégats (vide : en mémoire)")
+	descripteur := flag.String("descripteur", "", "fichier dont la date de modification est la publication du descripteur")
+	onionbalanceStatus := flag.String("onionbalance-status", "", "socket de statut Onionbalance (publication du descripteur)")
 	quarantaine := flag.Duration("quarantaine", 72*time.Hour, "durée de quarantaine")
 	intervalle := flag.Duration("intervalle", 10*time.Minute, "intervalle moyen entre deux passes")
 	sondesMin := flag.Int("sondes-min", 2, "sondes réussies minimum avant admission")
@@ -70,17 +75,22 @@ func main() {
 	}
 
 	cfg := config{
-		Quarantaine:         *quarantaine,
-		EchecsMax:           *echecsMax,
-		DoutesMax:           *doutesMax,
-		IndispoMax:          *indispoMax,
-		SondesMin:           *sondesMin,
-		MaxInscriptionsJour: *maxJour,
-		MaxParIP:            *maxIP,
-		Reference:           *reference,
-		Domaines:            domaines,
-		DomainesParPasse:    *domainesParPasse,
-		Client:              client,
+		Quarantaine:          *quarantaine,
+		EchecsMax:            *echecsMax,
+		DoutesMax:            *doutesMax,
+		IndispoMax:           *indispoMax,
+		SondesMin:            *sondesMin,
+		MaxInscriptionsJour:  *maxJour,
+		MaxParIP:             *maxIP,
+		Reference:            *reference,
+		Domaines:             domaines,
+		DomainesParPasse:     *domainesParPasse,
+		Client:               client,
+		CoeurFichier:         *coeurFichier,
+		DescripteurFichier:   *descripteur,
+		OnionbalanceStatus:   *onionbalanceStatus,
+		ReseauFichier:        *reseauFichier,
+		ReseauInterneFichier: *reseauInterne,
 	}
 	r, err := nouveauRegistre(*etatChemin, *poolChemin, cfg)
 	if err != nil {
@@ -97,6 +107,9 @@ func main() {
 	}
 	if err := r.ecrirePool(); err != nil {
 		log.Fatalf("pool communauté : %v", err)
+	}
+	if err := r.publierReseau(time.Now()); err != nil {
+		log.Printf("état réseau : %v", err)
 	}
 
 	go func() {

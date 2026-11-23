@@ -46,7 +46,9 @@ adresse affichée par `sudo cat $DONNEES/tor/registre/hostname`). Il expose :
 - `POST /inscription/confirmer` `{adresse_instance}` : vérifie que le nœud sert
   le défi sur `/.well-known/tordns/defi` ;
 - `GET /` page publique (adresse, ancienneté, disponibilité, sans contact) ;
-- `GET /etat` même contenu en JSON.
+- `GET /etat` même contenu en JSON ;
+- `GET /reseau` état public agrégé, HTML et SVG sans JavaScript ;
+- `GET /reseau.json` même état en JSON.
 
 Un candidat n'est admis qu'après **72 h de sondes toutes réussies** (réglable
 par `-quarantaine`). À chaque passe, trois domaines sont tirés au hasard dans
@@ -73,6 +75,28 @@ sudo systemctl enable --now tordns-recharger-communaute.timer
 configuration a changé. Un pool vide conserve la dernière configuration
 valide (on ne coupe pas l'adresse communauté parce qu'un dernier nœud part).
 
+## État public du réseau (Mission 22)
+
+Le registre agrège ses propres sondes cœur et communauté dans
+`/donnees/etat-reseau.json` : nœuds admis et joignables, délais médian et p95
+sur 24 h, taux de réponses DNSSEC correctes et dernière tentative de
+publication du descripteur. L'historique est borné à 30 jours d'agrégats
+horaires. Les adresses d'instance sont tronquées aux huit premiers caractères
+et aucun contact, nom de domaine demandé, défi ou compteur de trafic par nœud
+n'est publié. L'échantillon privé qui permet de recalculer les percentiles
+reste dans `/donnees/reseau-interne.json` (0600) et n'est jamais servi.
+
+La date de publication vient du socket de statut d'Onionbalance
+(`/run/tordns/onionbalance.sock`) ; à défaut, le registre peut lire la date de
+modification du fichier passé à `-descripteur`. Le socket est créé par
+Onionbalance dans le volume `run/` partagé avec le registre.
+
 **Ce qui n'est pas prouvable** : qu'un bénévole ne journalise pas. La page
 publique et les clients doivent le dire ; la validation DNSSEC côté client
 (mission 12) limite le mensonge sur les zones signées, pas la collecte.
+
+La copie sur GitHub Pages est désactivée par défaut. Pour l'activer, Gary doit
+créer les variables de dépôt `TORDNS_PUBLIER_ETAT_RESEAU=oui` et
+`TORDNS_REGISTRE_ONION=<adresse v3 du registre>` ; le workflow Pages lit alors
+`/reseau.json` et `/reseau` par Tor, sinon la page du site renvoie vers
+l'adresse `.onion` fournie par la configuration.

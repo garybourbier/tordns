@@ -64,6 +64,8 @@ func (r *registre) routes() http.Handler {
 	mux.HandleFunc("/inscription", r.posterInscription)
 	mux.HandleFunc("/inscription/confirmer", r.posterConfirmation)
 	mux.HandleFunc("/etat", r.getEtat)
+	mux.HandleFunc("/reseau.json", r.getReseauJSON)
+	mux.HandleFunc("/reseau", r.getReseau)
 	mux.HandleFunc("/", r.getPage)
 	return mux
 }
@@ -135,6 +137,33 @@ func (r *registre) getEtat(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	ecrireJSON(w, http.StatusOK, r.instantane())
+}
+
+func (r *registre) getReseauJSON(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		ecrireJSON(w, http.StatusMethodNotAllowed, map[string]string{"erreur": "méthode non autorisée"})
+		return
+	}
+	ecrireJSON(w, http.StatusOK, r.instantaneReseau(r.cfg.Maintenant()))
+}
+
+type vueReseau struct {
+	etatReseauPublic
+	Graphique template.HTML
+}
+
+func (r *registre) getReseau(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+	e := r.instantaneReseau(r.cfg.Maintenant())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	_ = pageReseauModele.Execute(w, vueReseau{etatReseauPublic: e, Graphique: graphiqueSVG(e.Historique)})
 }
 
 var pageModele = template.Must(template.New("page").Parse(`<!doctype html>

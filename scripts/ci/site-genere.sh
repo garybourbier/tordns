@@ -12,6 +12,7 @@ mkdir -p "$SORTIE/en"
 
 python3 - "$RACINE" "$SORTIE" <<'PY'
 import json
+import os
 import pathlib
 import re
 import sys
@@ -29,6 +30,17 @@ pages = [
     ("en/index.html", racine / "site" / "gabarits" / "en.html", sortie / "en" / "index.html", "../"),
 ]
 
+def lien_etat_reseau():
+    onion = os.environ.get("TORDNS_REGISTRE_ONION", "").strip()
+    if not onion:
+        return "<span>Adresse du registre non configurée.</span>"
+    if not re.fullmatch(r"[a-z2-7]{56}\.onion", onion):
+        raise SystemExit("ERREUR : TORDNS_REGISTRE_ONION n'est pas une adresse v3")
+    if os.environ.get("TORDNS_COPIE_ETAT_RESEAU") == "oui":
+        return '<a href="reseau.html">Consulter l’état du réseau</a>'
+    return f'<a href="http://{onion}/reseau">Consulter l’état du réseau</a>'
+
+
 def remplacer(texte, racine_rel):
     def lien(m):
         cle = m.group(1)
@@ -45,6 +57,7 @@ def remplacer(texte, racine_rel):
     texte = texte.replace("{{VERSION}}", version)
     texte = texte.replace("{{RACINE}}", racine_rel)
     texte = texte.replace("{{SOMMES}}", base + data["sommes"])
+    texte = texte.replace("{{LIEN_ETAT_RESEAU}}", lien_etat_reseau())
     texte = re.sub(r"\{\{LIEN:([^}]+)\}\}", lien, texte)
     texte = re.sub(r"\{\{NOM:([^}]+)\}\}", nom, texte)
     if "{{" in texte:

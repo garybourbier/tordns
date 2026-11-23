@@ -39,7 +39,22 @@ ENV_FILE="$DONNEES/.env"
 [ -f "$ENV_FILE" ] || die "contrôleur non initialisé : lancer creer-maitresse.sh"
 [ -s "$DONNEES/maitresse.key" ] || die "clé maîtresse absente : lancer creer-maitresse.sh"
 
-"$BASE/scripts/generer-config.sh" --pool "$POOL" --donnees "$DONNEES"
+mkdir -p "$DONNEES/run"
+chmod 0700 "$DONNEES/run"
+UID_=$(sed -n 's/^TORDNS_CONTROLEUR_UID=//p' "$ENV_FILE" | head -n 1)
+GID_=$(sed -n 's/^TORDNS_CONTROLEUR_GID=//p' "$ENV_FILE" | head -n 1)
+if [ -n "$UID_" ] && [ -n "$GID_" ]; then
+	chown "$UID_:$GID_" "$DONNEES/run" 2>/dev/null || true
+fi
+"$BASE/scripts/generer-config.sh" --pool "$POOL" --donnees "$DONNEES" \
+	--status-socket /run/tordns/onionbalance.sock
+
+# Le registre lit le pool cœur en lecture seule pour l'état public (mission 22).
+# Il est recopié dans le volume /pools quand il vient d'un autre chemin.
+if [ "$POOL" != "$DONNEES/pools/coeur.txt" ]; then
+	mkdir -p "$DONNEES/pools"
+	cp "$POOL" "$DONNEES/pools/coeur.txt"
+fi
 
 # Pool communauté (Mission 10) : activé seulement quand la clé et un premier
 # pool existent. Le registre et son service caché démarrent dans tous les cas.
@@ -48,7 +63,8 @@ if [ -s "$DONNEES/communaute.key" ] && [ -s "$DONNEES/pools/communaute.txt" ] &&
 	grep -Eq '^[a-z2-7]{56}\.onion$' "$DONNEES/pools/communaute.txt"; then
 	"$BASE/scripts/generer-config.sh" --pool "$DONNEES/pools/communaute.txt" \
 		--donnees "$DONNEES" --cle /donnees/communaute.key \
-		--sortie "$DONNEES/config-communaute.yaml"
+		--sortie "$DONNEES/config-communaute.yaml" \
+		--status-socket /run/tordns/onionbalance-communaute.sock
 	PROFIL="--profile communaute"
 fi
 

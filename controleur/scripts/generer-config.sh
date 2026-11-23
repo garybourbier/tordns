@@ -13,6 +13,7 @@ set -eu
 BASE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 POOL="$BASE/pools/coeur.txt"
+STATUS_SOCKET=
 # Chemin de la clé dans le conteneur Onionbalance (jamais sur l'hôte en clair
 # dans la configuration).
 CLE=/donnees/maitresse.key
@@ -44,8 +45,13 @@ while [ $# -gt 0 ]; do
 		CLE=$2
 		shift 2
 		;;
+	--status-socket)
+		[ $# -ge 2 ] || die "--status-socket exige un chemin"
+		STATUS_SOCKET=$2
+		shift 2
+		;;
 	-h | --help)
-		printf 'Usage : %s [--pool fichier] [--donnees dossier] [--sortie fichier]\n' "$0"
+		printf 'Usage : %s [--pool fichier] [--donnees dossier] [--sortie fichier] [--status-socket chemin]\n' "$0"
 		exit 0
 		;;
 	*) die "option inconnue : $1" ;;
@@ -65,6 +71,9 @@ trap 'rm -f "$TMP"' EXIT
 {
 	printf '# TorDNS — configuration Onionbalance générée depuis %s.\n' "$POOL"
 	printf '# Ne pas modifier à la main : éditer le pool puis relancer demarrer.sh.\n'
+	if [ -n "$STATUS_SOCKET" ]; then
+		printf 'status-socket-location: %s\n' "$STATUS_SOCKET"
+	fi
 	printf 'services:\n'
 	printf '  - key: %s\n' "$CLE"
 	printf '    instances:\n'

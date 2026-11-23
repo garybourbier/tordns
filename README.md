@@ -102,6 +102,10 @@ sont construites localement.
   communauté> --rejoindre <adresse du registre>`. Voir
   [le guide du nœud](noeud/README.md) et
   [le cadrage du réseau](docs/missions/chantier-2-cadrage.md).
+- Le registre publie `/reseau` et `/reseau.json` sur son service caché :
+  agrégats de sondes seulement, adresses de bénévoles tronquées. Le contrôleur
+  peut aussi recevoir une copie sur GitHub Pages, désactivée par défaut (voir
+  [le contrôleur](controleur/README.md)).
 
 ## Architecture
 

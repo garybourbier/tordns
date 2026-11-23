@@ -35,19 +35,24 @@ var (
 )
 
 type config struct {
-	Quarantaine         time.Duration
-	EchecsMax           int
-	DoutesMax           int
-	IndispoMax          int
-	SondesMin           int
-	MaxInscriptionsJour int
-	MaxParIP            int
-	Reference           string
-	Domaines            []string
-	DomainesParPasse    int
-	Client              *http.Client
-	Maintenant          func() time.Time
-	Hook                func()
+	Quarantaine          time.Duration
+	EchecsMax            int
+	DoutesMax            int
+	IndispoMax           int
+	SondesMin            int
+	MaxInscriptionsJour  int
+	MaxParIP             int
+	Reference            string
+	Domaines             []string
+	DomainesParPasse     int
+	Client               *http.Client
+	Maintenant           func() time.Time
+	Hook                 func()
+	CoeurFichier         string
+	DescripteurFichier   string
+	OnionbalanceStatus   string
+	ReseauFichier        string
+	ReseauInterneFichier string
 }
 
 type candidat struct {
@@ -87,6 +92,14 @@ type registre struct {
 	etat       etat
 	chemin     string
 	cheminPool string
+	reseau     *reseau
+	coeur      []string
+}
+
+type mesureSonde struct {
+	Delai     time.Duration
+	Correct   bool
+	Joignable bool
 }
 
 func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
@@ -125,7 +138,11 @@ func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
 			"ietf.org", "nlnetlabs.nl", "internetsociety.org", "dnssec-failed.org",
 		}
 	}
-	r := &registre{cfg: cfg, chemin: chemin, cheminPool: cheminPool, etat: etat{
+	reseauEtat, err := chargerReseau(cfg.ReseauInterneFichier)
+	if err != nil {
+		return nil, err
+	}
+	r := &registre{cfg: cfg, chemin: chemin, cheminPool: cheminPool, reseau: reseauEtat, etat: etat{
 		Candidats:    map[string]*candidat{},
 		Admis:        map[string]*admis{},
 		Evinces:      map[string]time.Time{},
@@ -154,6 +171,7 @@ func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
 	if r.etat.Inscriptions == nil {
 		r.etat.Inscriptions = map[string]int{}
 	}
+	r.coeur = r.lireCoeur()
 	return r, nil
 }
 
@@ -294,35 +312,60 @@ func (r *registre) confirmer(adresse string) (candidat, error) {
 // mensonge ; sur une réponse non signée, c'est seulement un doute, identifié
 // par une empreinte de domaine (jamais le nom en clair).
 func (r *registre) sonder(adresse string, domaines []string) ([]string, error) {
+	douteux, _, err := r.sonderAvecMesures(adresse, domaines)
+	return douteux, err
+}
+
+func (r *registre) sonderAvecMesures(adresse string, domaines []string) ([]string, []mesureSonde, error) {
 	url, err := urlNoeud(adresse)
 	if err != nil {
-		return nil, errIndisponible
+		return nil, nil, errIndisponible
 	}
 	var douteux []string
+	var mesures []mesureSonde
 	for _, domaine := range domaines {
 		attendu, err := interrogerReference(r.cfg.Reference, domaine)
 		if err != nil {
-			return nil, fmt.Errorf("référence DNSSEC indisponible")
+			return douteux, mesures, fmt.Errorf("référence DNSSEC indisponible")
 		}
+		debut := time.Now()
 		obtenu, _, err := interrogerDoH(r.cfg.Client, url, domaine)
+		mesure := mesureSonde{Delai: time.Since(debut), Joignable: err == nil, Correct: err == nil}
 		if err != nil {
-			return nil, errIndisponible
+			mesures = append(mesures, mesure)
+			return douteux, mesures, errIndisponible
 		}
 		if obtenu.Rcode != attendu.Rcode || obtenu.AD != attendu.AD {
-			return nil, errMensonge
+			mesure.Correct = false
+			mesures = append(mesures, mesure)
+			return douteux, mesures, errMensonge
 		}
 		if len(attendu.IPs) == 0 && len(obtenu.IPs) == 0 {
+			mesures = append(mesures, mesure)
 			continue
 		}
 		if intersection(attendu.IPs, obtenu.IPs) {
+			mesures = append(mesures, mesure)
 			continue
 		}
 		if attendu.AD || obtenu.AD {
-			return nil, errMensonge
+			mesure.Correct = false
+			mesures = append(mesures, mesure)
+			return douteux, mesures, errMensonge
 		}
+		mesures = append(mesures, mesure)
 		douteux = append(douteux, empreinteDomaine(domaine))
 	}
-	return douteux, nil
+	return douteux, mesures, nil
+}
+
+func auMoinsJoignable(mesures []mesureSonde) bool {
+	for _, mesure := range mesures {
+		if mesure.Joignable {
+			return true
+		}
+	}
+	return false
 }
 
 // intersection compare deux listes triées d'adresses sans allouer de map.
@@ -390,7 +433,8 @@ func (r *registre) passe() (bool, error) {
 		if candidat && !confirme {
 			continue
 		}
-		douteux, err := r.sonder(adresse, domaines)
+		douteux, mesures, err := r.sonderAvecMesures(adresse, domaines)
+		r.reseau.ajouterSonde(categorieCommunaute, adresse, mesures, auMoinsJoignable(mesures), maintenant)
 		r.mu.Lock()
 		if c, ok := r.etat.Candidats[adresse]; ok {
 			if err != nil {
@@ -454,6 +498,18 @@ func (r *registre) passe() (bool, error) {
 		}
 		r.mu.Unlock()
 	}
+	// Le pool cœur ne participe pas à l'admission, mais ses sondes alimentent
+	// le même état public. Une adresse retirée du pool disparaît des compteurs
+	// au prochain chargement du fichier.
+	r.mu.Lock()
+	r.coeur = r.lireCoeur()
+	coeur := append([]string(nil), r.coeur...)
+	r.mu.Unlock()
+	for _, adresse := range coeur {
+		_, mesures, err := r.sonderAvecMesures(adresse, domaines)
+		r.reseau.ajouterSonde(categorieCoeur, adresse, mesures, auMoinsJoignable(mesures), maintenant)
+		_ = err
+	}
 	r.mu.Lock()
 	err := r.enregistrer()
 	r.mu.Unlock()
@@ -465,7 +521,35 @@ func (r *registre) passe() (bool, error) {
 	if err == nil && change && r.cfg.Hook != nil {
 		r.cfg.Hook()
 	}
+	if err == nil {
+		if errPub := r.publierReseau(maintenant); errPub != nil {
+			return change, errPub
+		}
+	}
 	return change, err
+}
+
+// lireCoeur relit le pool cœur à chaque passe : l'administrateur peut le
+// modifier sans redémarrer le registre. Les lignes vides et commentaires sont
+// ignorés ; une adresse invalide ne peut pas entrer dans les sondes.
+func (r *registre) lireCoeur() []string {
+	if r.cfg.CoeurFichier == "" {
+		return nil
+	}
+	brut, err := os.ReadFile(r.cfg.CoeurFichier)
+	if err != nil {
+		return nil
+	}
+	var adresses []string
+	for _, ligne := range strings.Split(string(brut), "\n") {
+		ligne = strings.TrimSpace(ligne)
+		if ligne == "" || strings.HasPrefix(ligne, "#") || !reAdresse.MatchString(ligne) {
+			continue
+		}
+		adresses = append(adresses, ligne)
+	}
+	sort.Strings(adresses)
+	return adresses
 }
 
 // ecrirePool publie le pool communauté à partir des seuls nœuds admis. Le

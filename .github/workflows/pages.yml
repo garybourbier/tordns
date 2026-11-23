@@ -6,7 +6,11 @@ on:
     paths:
       - "site/**"
       - "scripts/ci/site-genere.sh"
+      - "scripts/ci/copier-etat-reseau.sh"
       - ".github/workflows/pages.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
 
 concurrency:
   group: pages
@@ -19,12 +23,23 @@ jobs:
   construire:
     name: Construire le site
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Installer Tor pour la copie optionnelle
+        if: vars.TORDNS_PUBLIER_ETAT_RESEAU == 'oui'
+        run: sudo apt-get update && sudo apt-get install -y tor
+      - name: Copier l'état du réseau (optionnel)
+        if: vars.TORDNS_PUBLIER_ETAT_RESEAU == 'oui'
+        env:
+          TORDNS_REGISTRE_ONION: ${{ vars.TORDNS_REGISTRE_ONION }}
+        run: ./scripts/ci/copier-etat-reseau.sh
       - run: ./scripts/ci/site-genere.sh
+        env:
+          TORDNS_REGISTRE_ONION: ${{ vars.TORDNS_REGISTRE_ONION }}
+          TORDNS_COPIE_ETAT_RESEAU: ${{ vars.TORDNS_PUBLIER_ETAT_RESEAU }}
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site
