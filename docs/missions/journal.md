@@ -355,3 +355,21 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, activer Pages et vérifier l'URL publiée ; à
   Claude, relire les textes de sécurité et les liens de téléchargement au
   premier déploiement.
+
+## Mission 18 — README à jour (23/11/2026)
+
+- **Fait** : README réécrit dans l'ordre demandé : présentation et badges,
+  tableau des téléchargements par plateforme/architecture, démarrage rapide
+  Linux/Windows/macOS/Android, nœud et images GHCR, architecture Onionbalance /
+  registre / mises à jour, modèle de menace et limites reprises du journal,
+  développement, historique des missions 1 à 19 et licence MIT. Les 13 noms de
+  téléchargements viennent de `site/telechargements.json`, donc de la même
+  source que la release. Les README des quatre clients et du nœud renvoient aux
+  téléchargements de la release ; le nœud documente `--images ghcr`.
+  `scripts/verifier-m18.sh` vérifie les sections, l'absence des formulations
+  marketing, les liens relatifs, l'alignement exact des 13 liens avec la liste
+  de release et les renvois des composants.
+- **Reste / non prouvé** : le rendu réel du README et des badges sur GitHub, et
+  les liens externes (GitHub, shields.io, page Pages), ne sont pas visités ici.
+- **Demandé à qui** : à Gary, jeter un œil au README rendu après le premier
+  push ; à Claude, relire le modèle de menace et la liste des limites.
