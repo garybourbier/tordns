@@ -373,3 +373,23 @@ Une entrée par mission : fait, reste, demandé à qui.
   les liens externes (GitHub, shields.io, page Pages), ne sont pas visités ici.
 - **Demandé à qui** : à Gary, jeter un œil au README rendu après le premier
   push ; à Claude, relire le modèle de menace et la liste des limites.
+
+## Mission 20 — Fuzzing de l'analyse DNS (23/11/2026)
+
+- **Fait** : cinq cibles Go (`FuzzPasserelleDoH`, `FuzzRelaisClient`,
+  `FuzzValiderDNSSEC`, `FuzzEnTeteProxy`, `FuzzManifeste`) avec corpus de
+  départ dans `testdata/fuzz` (15 fichiers : A, réponses, paquets courts,
+  pointeurs de compression en boucle, PROXY v2 IPv4, manifeste). Deux cibles
+  `cargo-fuzz` : décodeur DNS Windows et `tordns_manifeste::verifier`.
+  `scripts/ci/fuzz.sh` lance Go ou Rust ; `.github/workflows/fuzz.yml` tourne
+  chaque lundi, 10 min par cible, avec `permissions: contents: read` et
+  archivage du corpus. Preuve `FUZZ_DUREE=2m ./scripts/verifier-m20.sh` :
+  5 cibles Go × 2 min et 2 cibles Rust × 2 min, environment nightly 1.102 et
+  cargo-fuzz 0.13.2 installés localement, aucun plantage ; tests de régression
+  Go/Rust verts. Aucun correctif de plantage n'a été nécessaire.
+- **Reste / non prouvé** : la durée réelle de 10 min par cible dans GitHub
+  Actions et l'archivage des corpus générés par la CI ; les cibles Rust
+  exigent nightly + cargo-fuzz, absents d'une machine sans ces outils.
+- **Demandé à qui** : à Gary, lancer une fois le workflow Fuzz à la main et
+  conserver les corpus s'ils grossissent ; à Claude, relire les cibles Rust et
+  la classification des entrées non valides.
