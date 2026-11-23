@@ -49,6 +49,8 @@ cache = 4096
 anti_fuite = non
 ttl_max = 3600
 delai = 15
+mode_adresse = coeur
+dnssec = oui
 ```
 
 - `anti_fuite = oui` ajoute `DisableSmartNameResolution` et
@@ -176,6 +178,36 @@ tordns-client 0.1.0
 $ wine "C:\Program Files\TorDNS\desinstaller.exe" /S
 # dossier d'installation supprimé, client.conf conservé (adresse .onion)
 ```
+
+## Mise à jour signée et DNSSEC (Mission 12)
+
+Le service expose `--maj` : il télécharge `manifeste.json` et sa signature par
+Tor, vérifie la signature Ed25519 avec la clé épinglée et la version, puis
+télécharge l'installateur NSIS. Taille et SHA-256 sont contrôlés avant de le
+lancer en `/S`. L'installateur précédent est gardé dans
+`C:\ProgramData\TorDNS\maj\` ; si le service ne redémarre pas, il est relancé.
+L'installateur NSIS crée une tâche planifiée quotidienne `TorDNS-Maj` exécutée
+par SYSTEM.
+
+```bat
+tordns-client --maj
+```
+
+Variables : `TORDNS_MAJ_MANIFESTE`, `TORDNS_MAJ_SIGNATURE` (défaut
+`…manifeste.json.sig`), `TORDNS_MAJ_CLE` (rotation/tests). Une URL du manifeste
+qui ne pointe pas vers le `.onion` configuré est refusée : le client ne sort
+jamais du réseau Tor pour une mise à jour.
+
+La liste d'adresses du dernier manifeste vérifié est conservée dans
+`C:\ProgramData\TorDNS\maj\manifeste.json`. `mode_adresse = coeur` (défaut) ne
+bascule jamais sur la communauté ; `secours` essaie le cœur puis la communauté ;
+`communaute` force la communauté. Une liste absente ou expirée retombe sur
+`onion =`.
+
+`dnssec = oui` (défaut) fait valider chaque réponse par `hickory-proto` avec les
+ancres racine IANA, à travers le même POST DoH Tor. Une signature fausse donne
+SERVFAIL ; la réponse du nœud n'est jamais relayée. `dnssec = non` désactive la
+validation.
 
 ## Non vérifié ici, et pourquoi
 

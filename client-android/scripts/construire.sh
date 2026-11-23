@@ -9,7 +9,8 @@ set -euo pipefail
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/opt/android-sdk}}"
 PLATEFORME="${PLATEFORME:-android-34}"
-OUTILS="${OUTILS:-$SDK/build-tools/34.0.0}"
+OUTILS="${OUTILS:-$SDK/build-tools/36.1.0}"
+[ -d "$OUTILS" ] || OUTILS="$SDK/build-tools/34.0.0"
 NDK="${NDK:-$SDK/ndk/26.3.11579264}"
 ANDROID_JAR="$SDK/platforms/$PLATEFORME/android.jar"
 CONSTRUCTION="$RACINE/build"
@@ -38,19 +39,19 @@ mkdir -p "$CONSTRUCTION/gen" "$CONSTRUCTION/classes" "$CONSTRUCTION/dex"
     --manifest "$RACINE/app/src/main/AndroidManifest.xml" \
     --java "$CONSTRUCTION/gen" \
     --min-sdk-version 26 --target-sdk-version 34 --debug-mode \
-    --version-code 1 --version-name 0.1 \
+    --version-code 2 --version-name 0.2 \
     "$CONSTRUCTION/res.zip"
 
 echo "== 3. Java puis DEX =="
 trouve_java() { find "$RACINE/app/src/main/java" "$CONSTRUCTION/gen" -name '*.java'; }
 # shellcheck disable=SC2046
 javac --release 11 -Xlint:all -Werror \
-    -classpath "$ANDROID_JAR" \
+    -classpath "$ANDROID_JAR:$RACINE/libs/*" \
     -d "$CONSTRUCTION/classes" \
     $(trouve_java)
 (cd "$CONSTRUCTION/classes" && jar cf "$CONSTRUCTION/classes.jar" .)
 "$OUTILS/d8" --release --min-api 26 --lib "$ANDROID_JAR" \
-    --output "$CONSTRUCTION/dex" "$CONSTRUCTION/classes.jar"
+    --output "$CONSTRUCTION/dex" "$CONSTRUCTION/classes.jar" "$RACINE"/libs/*.jar
 
 echo "== 4. Assemblage de l'APK =="
 mkdir -p "$CONSTRUCTION/apk/lib/arm64-v8a"

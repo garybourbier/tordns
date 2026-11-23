@@ -4,11 +4,14 @@
 //! Windows et testables partout. `wintun` et `service` ne sont compilés que
 //! pour Windows.
 
+pub mod adresses;
 pub mod cache;
 pub mod config;
 pub mod diagnostic;
 pub mod dns;
 pub mod doh;
+pub mod dnssec;
+pub mod maj;
 pub mod paquet;
 pub mod resolveur;
 

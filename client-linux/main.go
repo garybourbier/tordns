@@ -9,6 +9,7 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ type config struct {
 	concurrence int
 	diagnostic  bool
 	racine      string
+	dnssec      string // non, auto (défaut) ou strict
+	modeAdresse string
+	adresses    string
 }
 
 type relais struct {
@@ -41,6 +45,8 @@ type relais struct {
 	requetes atomic.Uint64
 	hits     atomic.Uint64
 	erreurs  atomic.Uint64
+	dnssec   string
+	valider  func([]byte) error
 }
 
 func envOu(cle, defaut string) string {
@@ -63,6 +69,9 @@ func chargerConfig() config {
 		ecoute:      envOu("TORDNS_ECOUTE", "127.0.0.1:53"),
 		socks:       envOu("TORDNS_SOCKS", "127.0.0.1:9050"),
 		onion:       envOu("TORDNS_ONION", ""),
+		dnssec:      envOu("TORDNS_DNSSEC", "auto"),
+		modeAdresse: envOu("TORDNS_MODE_ADRESSE", "coeur"),
+		adresses:    envOu("TORDNS_ADRESSES", dossierAdresses()),
 		tailleCache: envEntier("TORDNS_CACHE", 4096),
 	}
 	flag.StringVar(&cfg.ecoute, "ecoute", cfg.ecoute, "adresse et port d'écoute (UDP et TCP)")
@@ -74,6 +83,9 @@ func chargerConfig() config {
 	flag.IntVar(&cfg.concurrence, "concurrence", 64, "requêtes simultanées au maximum")
 	flag.BoolVar(&cfg.diagnostic, "diagnostic", false, "inspecte les fuites DNS et quitte sans démarrer le relais")
 	flag.StringVar(&cfg.racine, "racine", "/", "racine d'inspection du diagnostic (tests)")
+	flag.StringVar(&cfg.dnssec, "dnssec", cfg.dnssec, "validation DNSSEC : non, auto ou strict")
+	flag.StringVar(&cfg.modeAdresse, "mode-adresse", cfg.modeAdresse, "adresse : coeur, secours ou communaute")
+	flag.StringVar(&cfg.adresses, "adresses", cfg.adresses, "dossier du manifeste d'adresses vérifié")
 	flag.Parse()
 	cfg.ttlMax = time.Duration(*ttlMax) * time.Second
 	cfg.delai = *delai
@@ -99,6 +111,16 @@ func (r *relais) traiter(msg []byte) []byte {
 		log.Printf("erreur de résolution (type %d) : %v", q.qtype, err)
 		return servfail(msg)
 	}
+	if r.valider != nil {
+		err := r.valider(rep)
+		if errors.Is(err, ErrZoneNonSignee) && r.dnssec == "auto" {
+			// Zone non signée : comportement normal, aucune garantie DNSSEC.
+		} else if err != nil {
+			r.erreurs.Add(1)
+			log.Printf("réponse refusée par DNSSEC (type %d) : %v", q.qtype, err)
+			return servfail(msg)
+		}
+	}
 	if ttl, ok := cacheable(rep, r.cfg.ttlMax); ok {
 		r.cache.poser(cle, rep, ttl)
 	}
@@ -108,6 +130,12 @@ func (r *relais) traiter(msg []byte) []byte {
 // interroger tente une résolution, puis une seule fois de plus en cas de
 // connexion morte réutilisée depuis le pool.
 func (r *relais) interroger(msg []byte) ([]byte, error) {
+	return r.brut(msg)
+}
+
+// brut envoie une requête sans validation DNSSEC : c'est le chemin utilisé
+// pour construire la chaîne d'ancrage elle-même.
+func (r *relais) brut(msg []byte) ([]byte, error) {
 	var derniere error
 	for essai := 0; essai < 2; essai++ {
 		cn, err := r.doh.emprunter()
@@ -213,17 +241,32 @@ func main() {
 		}
 		return
 	}
+	if !modeValide(cfg.modeAdresse) {
+		log.Fatalf("mode d'adresse inconnu %q : coeur, secours ou communaute", cfg.modeAdresse)
+	}
+	cfg.onion = adresseEffective(cfg.adresses, clePublique(), cfg.modeAdresse, cfg.onion)
 	if cfg.onion == "" {
-		log.Fatal("adresse .onion requise : renseigner TORDNS_ONION ou -onion")
+		log.Fatal("aucune adresse .onion : renseigner TORDNS_ONION ou fournir un manifeste signé")
 	}
 	if _, _, err := net.SplitHostPort(cfg.ecoute); err != nil {
 		log.Fatalf("adresse d'écoute invalide %q : %v", cfg.ecoute, err)
 	}
 
+	if cfg.dnssec != "non" && cfg.dnssec != "auto" && cfg.dnssec != "strict" {
+		log.Fatalf("mode DNSSEC inconnu %q : non, auto ou strict", cfg.dnssec)
+	}
 	r := &relais{
-		cfg:   cfg,
-		cache: nouveauCache(cfg.tailleCache),
-		doh:   nouveauClientDoH(cfg.onion, cfg.socks, cfg.delai, cfg.concurrence),
+		cfg:    cfg,
+		cache:  nouveauCache(cfg.tailleCache),
+		doh:    nouveauClientDoH(cfg.onion, cfg.socks, cfg.delai, cfg.concurrence),
+		dnssec: cfg.dnssec,
+	}
+	if cfg.dnssec != "non" {
+		v, err := nouveauValidateur(r.brut, ancreRacineDS)
+		if err != nil {
+			log.Fatalf("initialisation DNSSEC : %v", err)
+		}
+		r.valider = v.Valider
 	}
 
 	adresseUDP, err := net.ResolveUDPAddr("udp", cfg.ecoute)

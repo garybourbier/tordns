@@ -17,7 +17,7 @@ use arti_client::config::TorClientConfigBuilder;
 use arti_client::TorClient;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jbyteArray, jint, jstring};
+use jni::sys::{jbyteArray, jint, jlong, jstring};
 use jni::JNIEnv;
 use tokio::runtime::Runtime;
 use tor_rtcompat::PreferredRuntime;
@@ -186,6 +186,93 @@ fn doh_bloquant(onion: &str, requete: &[u8], delai: Duration) -> Result<Vec<u8>,
     })
 }
 
+/// Télécharge une ressource du miroir (`/maj/…`) par le circuit Tor, en HTTP
+/// GET. Le corps est borné : un manifeste ou un APK plus gros est refusé.
+fn telecharger_bloquant(onion: &str, chemin: &str, max: usize) -> Result<Vec<u8>, String> {
+    if !onion.ends_with(".onion") || onion.len() < 8 {
+        return Err("adresse .onion invalide".into());
+    }
+    if !chemin.starts_with('/') || chemin.contains(char::is_whitespace) {
+        return Err("chemin HTTP invalide".into());
+    }
+    let garde = client_slot()
+        .lock()
+        .map_err(|_| "verrou du client Tor empoisonné".to_string())?;
+    let client = garde
+        .as_ref()
+        .cloned()
+        .ok_or("Tor n'est pas encore démarré")?;
+    let rt = runtime()?;
+    let onion = onion.to_string();
+    let chemin = chemin.to_string();
+    rt.block_on(async move {
+        tokio::time::timeout(Duration::from_secs(120), async move {
+            let mut flux = client
+                .connect((onion.as_str(), 80u16))
+                .await
+                .map_err(|e| format!("connexion au service caché : {e}"))?;
+            let entete = format!(
+                "GET {chemin} HTTP/1.1\r\nHost: {onion}\r\nAccept: */*\r\n\
+                 User-Agent: TorDNS-Android/0.1\r\nConnection: close\r\n\r\n"
+            );
+            flux.write_all(entete.as_bytes())
+                .await
+                .map_err(|e| format!("écriture HTTP : {e}"))?;
+            flux.flush().await.map_err(|e| format!("écriture HTTP : {e}"))?;
+
+            let mut tampon = Vec::with_capacity(4096);
+            let mut bloc = [0u8; 4096];
+            let fin_entetes = loop {
+                let n = flux
+                    .read(&mut bloc)
+                    .await
+                    .map_err(|e| format!("lecture HTTP : {e}"))?;
+                if n == 0 {
+                    return Err("réponse HTTP tronquée (en-têtes)".to_string());
+                }
+                tampon.extend_from_slice(&bloc[..n]);
+                if let Some(p) = trouver(&tampon, b"\r\n\r\n") {
+                    break p + 4;
+                }
+                if tampon.len() > 16 * 1024 {
+                    return Err("en-têtes HTTP trop volumineux".into());
+                }
+            };
+            let statut = std::str::from_utf8(&tampon[..fin_entetes])
+                .map_err(|_| "en-têtes HTTP non UTF-8".to_string())?
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if !statut.contains(" 200 ") {
+                return Err(format!("HTTP a répondu « {} »", statut.trim()));
+            }
+            let longueur = content_length(&tampon[..fin_entetes])?;
+            if longueur > max {
+                return Err(format!("ressource trop volumineuse ({longueur} octets)"));
+            }
+            let mut corps = tampon.split_off(fin_entetes);
+            while corps.len() < longueur {
+                let n = flux
+                    .read(&mut bloc)
+                    .await
+                    .map_err(|e| format!("lecture HTTP : {e}"))?;
+                if n == 0 {
+                    return Err("réponse HTTP tronquée (corps)".to_string());
+                }
+                corps.extend_from_slice(&bloc[..n]);
+                if corps.len() > max {
+                    return Err("ressource trop volumineuse".into());
+                }
+            }
+            corps.truncate(longueur);
+            Ok(corps)
+        })
+        .await
+        .map_err(|_| "délai HTTP dépassé".to_string())?
+    })
+}
+
 fn trouver(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
@@ -246,6 +333,93 @@ pub extern "system" fn Java_org_tordns_client_Arti_doh(
         doh_bloquant(&onion, &octets, delai)
     })();
 
+    match resultat {
+        Ok(corps) => match env.byte_array_from_slice(&corps) {
+            Ok(arr) => arr.into_raw(),
+            Err(e) => {
+                note_erreur(format!("allocation JNI : {e}"));
+                std::ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            note_erreur(e);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_tordns_client_Arti_verifierManifeste(
+    env: JNIEnv,
+    _classe: JClass,
+    manifeste: JByteArray,
+    signature: JByteArray,
+    version_installee: jlong,
+    maintenant: jlong,
+) -> jstring {
+    let resultat: Result<String, String> = (|| {
+        let brut = env
+            .convert_byte_array(&manifeste)
+            .map_err(|e| format!("manifeste JNI invalide : {e}"))?;
+        let sig = env
+            .convert_byte_array(&signature)
+            .map_err(|e| format!("signature JNI invalide : {e}"))?;
+        let m = tordns_manifeste::accepter(
+            &brut,
+            &sig,
+            tordns_manifeste::CLE_PUBLIQUE_EPINGLEE,
+            version_installee as i64,
+            maintenant as i64,
+        )
+        .map_err(|e| e.to_string())?;
+        let c = m
+            .cibles
+            .get("client-android")
+            .ok_or_else(|| "cible client-android absente du manifeste".to_string())?;
+        Ok(format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            m.version,
+            c.url,
+            c.taille,
+            c.sha256,
+            m.cle_suivante,
+            m.adresses.get("coeur").map(String::as_str).unwrap_or(""),
+            m.adresses
+                .get("communaute")
+                .map(String::as_str)
+                .unwrap_or("")
+        ))
+    })();
+    match resultat {
+        Ok(record) => env
+            .new_string(record)
+            .map(|s| s.into_raw())
+            .unwrap_or(std::ptr::null_mut()),
+        Err(e) => {
+            let message = note_erreur(e);
+            env.new_string(message)
+                .map(|s| s.into_raw())
+                .unwrap_or(std::ptr::null_mut())
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_tordns_client_Arti_telecharger(
+    mut env: JNIEnv,
+    _classe: JClass,
+    onion: JString,
+    chemin: JString,
+    max: jint,
+) -> jbyteArray {
+    let resultat = (|| {
+        let onion = chaine(&mut env, &onion)?;
+        let chemin = chaine(&mut env, &chemin)?;
+        if max <= 0 {
+            return Err("taille maximale invalide".into());
+        }
+        telecharger_bloquant(&onion, &chemin, max as usize)
+    })();
     match resultat {
         Ok(corps) => match env.byte_array_from_slice(&corps) {
             Ok(arr) => arr.into_raw(),

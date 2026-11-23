@@ -29,6 +29,9 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_LANGUAGE "French"
 
 Section "Client TorDNS" SEC_CLIENT
+    ; Une mise à jour lancée par le service doit pouvoir remplacer l'exécutable.
+    ExecWait 'sc stop ${SERVICE}'
+    Sleep 2000
     SetOutPath "$INSTDIR"
     File "..\dist\tordns-client.exe"
     File /nonfatal "..\dist\wintun.dll"
@@ -44,6 +47,8 @@ Section "Client TorDNS" SEC_CLIENT
         FileWrite $0 "anti_fuite = non$\r$\n"
         FileWrite $0 "ttl_max = 3600$\r$\n"
         FileWrite $0 "delai = 15$\r$\n"
+        FileWrite $0 "mode_adresse = coeur$\r$\n"
+        FileWrite $0 "dnssec = oui$\r$\n"
         FileClose $0
     config_presente:
 
@@ -60,11 +65,16 @@ Section "Client TorDNS" SEC_CLIENT
     ExecWait 'sc create ${SERVICE} binPath= "$INSTDIR\tordns-client.exe" start= demand DisplayName= "${PRODUIT}"'
     ExecWait 'sc description ${SERVICE} "Relais DNS local vers le service caché Tor"'
     ExecWait 'sc failure ${SERVICE} reset= 86400 actions= restart/5000/restart/10000/restart/30000'
+    ExecWait 'sc start ${SERVICE}'
+
+    ; Vérification quotidienne du manifeste signé, par le service (SYSTEM).
+    ExecWait 'schtasks /Create /TN TorDNS-Maj /TR "\"$INSTDIR\tordns-client.exe\" --maj" /SC DAILY /ST 04:00 /RU SYSTEM /RL HIGHEST /F'
 SectionEnd
 
 Section "Uninstall"
     ExecWait 'sc stop ${SERVICE}'
     ExecWait 'sc delete ${SERVICE}'
+    ExecWait 'schtasks /Delete /TN TorDNS-Maj /F'
     Delete "$INSTDIR\tordns-client.exe"
     Delete "$INSTDIR\wintun.dll"
     Delete "$INSTDIR\desinstaller.exe"

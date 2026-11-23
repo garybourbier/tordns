@@ -18,6 +18,7 @@ Usage :\n\
   tordns-client --console [fichier]     relais au premier plan\n\
   tordns-client --verifier-config <f>   valide la configuration sans réseau\n\
   tordns-client --diagnostic            inspecte les fuites DNS et quitte\n\
+  tordns-client --maj [fichier]         vérifie et installe une mise à jour signée\n\
   tordns-client --aide | --version\n\
 \n\
 Configuration par défaut : %ProgramData%\\TorDNS\\client.conf\n\
@@ -28,6 +29,8 @@ Configuration par défaut : %ProgramData%\\TorDNS\\client.conf\n\
   anti_fuite = non\n\
   ttl_max = 3600\n\
   delai = 15\n\
+  mode_adresse = coeur\n\
+  dnssec = oui\n\
 \n\
 WinTun : wintun.dll doit être présente à côté de l'exécutable ou dans\n\
 System32. Le service exige les droits administrateur.",
@@ -43,6 +46,16 @@ fn main() {
         Some("--diagnostic") => {
             let constats = tordns_win::diagnostic::executer();
             if tordns_win::diagnostic::afficher(&constats) > 0 {
+                std::process::exit(1);
+            }
+        }
+        Some("--maj") => {
+            let chemin = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(Config::chemin_defaut);
+            if let Err(e) = tordns_win::maj::executer_reel(&chemin) {
+                eprintln!("MISE À JOUR REFUSÉE : {e}");
                 std::process::exit(1);
             }
         }

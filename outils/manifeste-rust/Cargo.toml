@@ -1,0 +1,16 @@
+[package]
+name = "tordns-manifeste"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+publish = false
+description = "Vérification du manifeste signé TorDNS pour les clients Rust"
+
+[lib]
+name = "tordns_manifeste"
+path = "src/lib.rs"
+
+[dependencies]
+ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

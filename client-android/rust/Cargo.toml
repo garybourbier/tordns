@@ -22,6 +22,7 @@ jni = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tor-rtcompat = "0.48.0"
+tordns-manifeste = { path = "../../outils/manifeste-rust" }
 
 [profile.release]
 opt-level = "z"

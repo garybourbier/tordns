@@ -14,6 +14,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
@@ -34,6 +35,11 @@ public class MainActivity extends Activity {
     private EditText champDomaine;
     private RadioButton modeDns;
     private RadioButton modeFuite;
+    private RadioButton modeCoeur;
+    private RadioButton modeSecours;
+    private RadioButton modeCommunaute;
+    private TextView avertissementAdresses;
+    private CheckBox validerDnssec;
     private Button boutonVpn;
     private TextView statut;
     private TextView moteur;
@@ -85,6 +91,31 @@ public class MainActivity extends Activity {
         champOnion.setText(p.getString("onion", ""));
         racine.addView(champOnion);
 
+        racine.addView(etiquette("Adresse utilisée"));
+        RadioGroup adresses = new RadioGroup(this);
+        modeCoeur = new RadioButton(this);
+        modeCoeur.setText("Cœur seulement (défaut)");
+        modeSecours = new RadioButton(this);
+        modeSecours.setText("Cœur, puis communauté en secours");
+        modeCommunaute = new RadioButton(this);
+        modeCommunaute.setText("Communauté");
+        adresses.addView(modeCoeur);
+        adresses.addView(modeSecours);
+        adresses.addView(modeCommunaute);
+        String modeAdresse = p.getString("mode_adresse", "coeur");
+        ("communaute".equals(modeAdresse) ? modeCommunaute
+                : "secours".equals(modeAdresse) ? modeSecours : modeCoeur).setChecked(true);
+        racine.addView(adresses);
+
+        avertissementAdresses = new TextView(this);
+        avertissementAdresses.setTextSize(12);
+        avertissementAdresses.setText("Les nœuds de la communauté sont des bénévoles "
+                + "non vérifiés : ils peuvent voir les noms que vous résolvez. "
+                + "Les adresses viennent d'un manifeste signé ; à défaut, celle saisie ci-dessus.");
+        avertissementAdresses.setPadding(0, 4, 0, 8);
+        racine.addView(avertissementAdresses);
+        chargerAdresses(p);
+
         racine.addView(etiquette("Mode de protection"));
         RadioGroup groupes = new RadioGroup(this);
         modeDns = new RadioButton(this);
@@ -95,6 +126,11 @@ public class MainActivity extends Activity {
         groupes.addView(modeFuite);
         (p.getBoolean("antifuite", false) ? modeFuite : modeDns).setChecked(true);
         racine.addView(groupes);
+
+        validerDnssec = new CheckBox(this);
+        validerDnssec.setText("Valider DNSSEC localement (recommandé)");
+        validerDnssec.setChecked(p.getBoolean("dnssec", true));
+        racine.addView(validerDnssec);
 
         diagnosticDns = new TextView(this);
         diagnosticDns.setTextSize(12);
@@ -117,6 +153,11 @@ public class MainActivity extends Activity {
         tester.setText("Résoudre via Tor");
         tester.setOnClickListener(v -> tester());
         racine.addView(tester);
+
+        Button maj = new Button(this);
+        maj.setText("Vérifier les mises à jour");
+        maj.setOnClickListener(v -> verifierMaj(p));
+        racine.addView(maj);
 
         statut = new TextView(this);
         statut.setText(Resolveur.INSTANCE.etat());
@@ -148,6 +189,12 @@ public class MainActivity extends Activity {
         setContentView(defilement);
 
         boucle.post(rafraichir);
+
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2);
+        }
 
         // Diagnostic réservé aux APK de débogage : permet de valider le chemin
         // Arti/DoH depuis adb, même écran verrouillé, sans activer de VPN.
@@ -195,6 +242,31 @@ public class MainActivity extends Activity {
         }, "diagnostic").start();
     }
 
+    /** Charge le dernier manifeste vérifié et mémorise les deux adresses. */
+    private void chargerAdresses(SharedPreferences p) {
+        String[] adresses = Maj.adressesVerifiees(getApplicationContext());
+        if (adresses != null) {
+            p.edit().putString("adresse_coeur", adresses[0])
+                    .putString("adresse_communaute", adresses[1]).apply();
+        }
+    }
+
+    private void verifierMaj(SharedPreferences p) {
+        String saisie = champOnion.getText().toString().trim().toLowerCase(Locale.ROOT);
+        String onion = Maj.choisirAdresse(saisie, "coeur",
+                p.getString("adresse_coeur", ""), p.getString("adresse_communaute", ""));
+        if (onion == null || !onion.endsWith(".onion")) {
+            Toast.makeText(this, "Adresse .onion absente", Toast.LENGTH_LONG).show();
+            return;
+        }
+        p.edit().putString("onion", saisie).apply();
+        Toast.makeText(this, "Vérification de la mise à jour…", Toast.LENGTH_SHORT).show();
+        Maj.verifier(this, onion, message -> {
+            chargerAdresses(p);
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        });
+    }
+
     private TextView etiquette(String texte) {
         TextView t = new TextView(this);
         t.setText(texte);
@@ -210,15 +282,22 @@ public class MainActivity extends Activity {
             startService(new Intent(this, TorVpnService.class).setAction(TorVpnService.ACTION_STOP));
             return;
         }
-        String onion = champOnion.getText().toString().trim().toLowerCase(Locale.ROOT);
-        if (!onion.endsWith(".onion") || onion.length() < 16) {
-            Toast.makeText(this, "Adresse .onion invalide", Toast.LENGTH_LONG).show();
+        String saisie = champOnion.getText().toString().trim().toLowerCase(Locale.ROOT);
+        String mode = modeCommunaute.isChecked() ? "communaute"
+                : modeSecours.isChecked() ? "secours" : "coeur";
+        String onion = Maj.choisirAdresse(saisie, mode,
+                p.getString("adresse_coeur", ""), p.getString("adresse_communaute", ""));
+        if (onion == null || !onion.endsWith(".onion") || onion.length() < 16) {
+            Toast.makeText(this, "Aucune adresse .onion : saisissez-en une", Toast.LENGTH_LONG).show();
             return;
         }
-        p.edit().putString("onion", onion)
+        p.edit().putString("onion", saisie)
+                .putString("mode_adresse", mode)
                 .putBoolean("antifuite", modeFuite.isChecked())
+                .putBoolean("dnssec", validerDnssec.isChecked())
                 .apply();
         Resolveur.INSTANCE.configurer(onion);
+        Resolveur.INSTANCE.setDnssec(validerDnssec.isChecked());
 
         Intent preparation = VpnService.prepare(this);
         if (preparation != null) {

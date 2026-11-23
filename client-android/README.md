@@ -30,7 +30,8 @@ Arti (Rust) ── circuits Tor ──► <adresse>.onion:80 ──► Caddy →
 
 ## Build
 
-Prérequis : JDK 17, Android SDK (plateforme 34, build-tools 34), NDK 26,
+Prérequis : JDK 17, Android SDK (plateforme 34, build-tools 36.1 pour d8),
+NDK 26,
 Rust avec la cible `aarch64-linux-android`. Aucun Gradle : l'APK est assemblé
 avec `aapt2`, `javac`, `d8`, `zipalign` et `apksigner`.
 
@@ -140,6 +141,36 @@ Requêtes : 73   cache : 23   erreurs : 0   entrées : 14
 Les trois noms sont résolus par TorDNS (compteur en hausse, cache alimenté,
 zéro erreur), puis les paquets ICMP sortent normalement par le réseau physique
 (seul le DNS est routé vers le TUN). Le VPN a été désactivé après le test.
+
+## Mises à jour, adresses signées, DNSSEC (Mission 12)
+
+`dnsjava` 3.6.3 et `slf4j-api` 2.0.16 sont fournis dans `libs/` (aucun accès
+réseau au build). L'APK construit ici porte `versionCode 2`, `versionName 0.2`.
+
+- **Vérification en arrière-plan** : bouton « Vérifier les mises à jour ». Le
+  manifeste et sa signature sont téléchargés par Arti (`/maj/`), vérifiés en
+  JNI par la même brique Rust que Windows, puis l'APK est téléchargé et son
+  SHA-256 contrôlé. Une notification « mise à jour vérifiée » est affichée.
+- **Installation** : au toucher, une session `PackageInstaller` ouvre la
+  confirmation Android. L'application ne peut pas se remplacer seule hors Play.
+  L'APK doit être signé avec **la même clé** que la version installée, sinon
+  Android refuse ; la clé de publication doit donc rester stable d'une version
+  à l'autre. Pour F-Droid, servir un dépôt `fdroid` statique depuis `/maj/` et
+  conserver cette même signature.
+- **Liste d'adresses** : le manifeste vérifié fournit `coeur` et `communaute`.
+  Le réglage « Cœur seulement » (défaut) ne bascule jamais sur un bénévole ;
+  « Cœur puis communauté » et « Communauté » sont explicites, avec
+  l'avertissement que les bénévoles ne sont pas vérifiés.
+- **DNSSEC** : case « Valider DNSSEC localement », activée par défaut.
+  `dnsjava` construit la chaîne DS/DNSKEY et vérifie les signatures ; une
+  signature fausse ou une chaîne rompue devient SERVFAIL. Une zone non signée
+  reste acceptée (comme en mode `auto` côté Linux). Les requêtes de validation
+  passent par le même circuit Tor. Aucun nom de domaine n'est journalisé.
+
+```bash
+./scripts/tester.sh   # inclut 4 vérifications DNSSEC JVM
+adb install -r build/tordns-client.apk
+```
 
 ## Sécurité et limites
 

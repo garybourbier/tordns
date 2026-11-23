@@ -30,17 +30,19 @@ type Etat struct {
 }
 
 type Config struct {
-	ManifesteURL string
-	SignatureURL string
-	SOCKS        string
-	Cible        string
-	Binaire      string
-	Service      string
-	Systemctl    string
-	Etat         string
-	Cle          string
-	Delai        time.Duration
-	Maintenant   func() time.Time
+	ManifesteURL   string
+	SignatureURL   string
+	SOCKS          string
+	Cible          string
+	Binaire        string
+	Service        string
+	Systemctl      string
+	Etat           string
+	CacheManifeste string
+	CacheSignature string
+	Cle            string
+	Delai          time.Duration
+	Maintenant     func() time.Time
 }
 
 type maj struct {
@@ -52,17 +54,18 @@ type maj struct {
 
 func main() {
 	cfg := Config{
-		ManifesteURL: envOu("TORDNS_MAJ_MANIFESTE", ""),
-		SignatureURL: envOu("TORDNS_MAJ_SIGNATURE", ""),
-		SOCKS:        envOu("TORDNS_MAJ_SOCKS", "127.0.0.1:9050"),
-		Cible:        envOu("TORDNS_MAJ_CIBLE", "client-linux-amd64"),
-		Binaire:      envOu("TORDNS_MAJ_BINAIRE", "/usr/local/bin/tordns-client"),
-		Service:      envOu("TORDNS_MAJ_SERVICE", "tordns-client"),
-		Systemctl:    envOu("TORDNS_MAJ_SYSTEMCTL", "systemctl"),
-		Etat:         envOu("TORDNS_MAJ_ETAT", "/var/lib/tordns/maj-client.json"),
-		Cle:          envOu("TORDNS_MAJ_CLE", manifeste.ClePubliqueEpinglee),
-		Delai:        2 * time.Minute,
-		Maintenant:   time.Now,
+		ManifesteURL:   envOu("TORDNS_MAJ_MANIFESTE", ""),
+		SignatureURL:   envOu("TORDNS_MAJ_SIGNATURE", ""),
+		SOCKS:          envOu("TORDNS_MAJ_SOCKS", "127.0.0.1:9050"),
+		Cible:          envOu("TORDNS_MAJ_CIBLE", "client-linux-amd64"),
+		Binaire:        envOu("TORDNS_MAJ_BINAIRE", "/usr/local/bin/tordns-client"),
+		Service:        envOu("TORDNS_MAJ_SERVICE", "tordns-client"),
+		Systemctl:      envOu("TORDNS_MAJ_SYSTEMCTL", "systemctl"),
+		Etat:           envOu("TORDNS_MAJ_ETAT", "/var/lib/tordns/maj-client.json"),
+		CacheManifeste: envOu("TORDNS_MAJ_ADRESSES", "/var/lib/tordns/maj/manifeste.json"),
+		Cle:            envOu("TORDNS_MAJ_CLE", manifeste.ClePubliqueEpinglee),
+		Delai:          2 * time.Minute,
+		Maintenant:     time.Now,
 	}
 	flag.StringVar(&cfg.ManifesteURL, "manifeste", cfg.ManifesteURL, "URL du manifeste")
 	flag.StringVar(&cfg.SignatureURL, "signature", cfg.SignatureURL, "URL de la signature")
@@ -72,8 +75,10 @@ func main() {
 	flag.StringVar(&cfg.Service, "service", cfg.Service, "unité systemd à redémarrer")
 	flag.StringVar(&cfg.Systemctl, "systemctl", cfg.Systemctl, "commande systemctl (tests)")
 	flag.StringVar(&cfg.Etat, "etat", cfg.Etat, "fichier d'état")
+	flag.StringVar(&cfg.CacheManifeste, "cache-manifeste", cfg.CacheManifeste, "manifeste vérifié conservé pour la liste d'adresses")
 	flag.StringVar(&cfg.Cle, "cle", cfg.Cle, "clé publique de publication (tests/rotation)")
 	flag.Parse()
+	cfg.CacheSignature = cfg.CacheManifeste + ".sig"
 
 	if cfg.ManifesteURL == "" {
 		fmt.Fprintln(os.Stderr, "ERREUR : aucune URL de manifeste (TORDNS_MAJ_MANIFESTE ou -manifeste)")
@@ -171,6 +176,19 @@ func (u *maj) executer() error {
 		return fmt.Errorf("v%d rejetée par le service, version précédente rétablie", m.Version)
 	}
 
+	if u.cfg.CacheManifeste != "" {
+		// Données publiques signées : lisibles par le service tordns, non
+		// modifiables par lui.
+		if err := os.MkdirAll(filepath.Dir(u.cfg.CacheManifeste), 0o755); err != nil {
+			return fmt.Errorf("dossier du manifeste : %w", err)
+		}
+		if err := os.WriteFile(u.cfg.CacheManifeste, brut, 0o644); err != nil {
+			return fmt.Errorf("cache du manifeste : %w", err)
+		}
+		if err := os.WriteFile(u.cfg.CacheSignature, sig, 0o644); err != nil {
+			return fmt.Errorf("cache de la signature : %w", err)
+		}
+	}
 	nouvel := Etat{Version: m.Version, Cle: etat.Cle}
 	if m.CleSuivante != "" {
 		nouvel.Cle = m.CleSuivante

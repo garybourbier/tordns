@@ -82,6 +82,72 @@ impl ClientDoh {
         Ok(corps)
     }
 
+    /// Adresse du service caché, pour vérifier qu'une URL du manifeste ne
+    /// désigne pas un autre hôte.
+    pub fn hote(&self) -> String {
+        self.onion.clone()
+    }
+
+    /// Télécharge une ressource du miroir du nœud (HTTP GET), avec une borne
+    /// stricte de taille. Utilisé par le manifeste et l'installateur de mise à
+    /// jour, jamais pour une requête DNS.
+    pub fn get(&self, chemin: &str, max: usize) -> Result<Vec<u8>, String> {
+        if !chemin.starts_with('/') || chemin.contains(char::is_whitespace) {
+            return Err("chemin HTTP invalide".into());
+        }
+        let mut flux = self.connecter()?;
+        let entete = format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nAccept: */*\r\n\
+             User-Agent: TorDNS-Windows/0.1\r\nConnection: close\r\n\r\n",
+            chemin, self.onion
+        );
+        flux.write_all(entete.as_bytes())
+            .map_err(|e| format!("écriture HTTP : {e}"))?;
+
+        let mut tampon = Vec::with_capacity(4096);
+        let mut bloc = [0u8; 4096];
+        let fin_entetes = loop {
+            let n = flux
+                .read(&mut bloc)
+                .map_err(|e| format!("lecture HTTP : {e}"))?;
+            if n == 0 {
+                return Err("réponse HTTP tronquée (en-têtes)".into());
+            }
+            tampon.extend_from_slice(&bloc[..n]);
+            if let Some(p) = trouver(&tampon, b"\r\n\r\n") {
+                break p + 4;
+            }
+            if tampon.len() > 16 * 1024 {
+                return Err("en-têtes HTTP trop volumineux".into());
+            }
+        };
+        let entetes = std::str::from_utf8(&tampon[..fin_entetes])
+            .map_err(|_| "en-têtes HTTP non UTF-8".to_string())?;
+        let statut = entetes.lines().next().unwrap_or("");
+        if !statut.contains(" 200 ") {
+            return Err(format!("HTTP a répondu « {} »", statut.trim()));
+        }
+        let longueur = content_length(entetes)?;
+        if longueur > max {
+            return Err(format!("ressource trop volumineuse ({longueur} octets)"));
+        }
+        let mut corps = tampon.split_off(fin_entetes);
+        while corps.len() < longueur {
+            let n = flux
+                .read(&mut bloc)
+                .map_err(|e| format!("lecture HTTP : {e}"))?;
+            if n == 0 {
+                return Err("réponse HTTP tronquée (corps)".into());
+            }
+            corps.extend_from_slice(&bloc[..n]);
+            if corps.len() > max {
+                return Err("ressource trop volumineuse".into());
+            }
+        }
+        corps.truncate(longueur);
+        Ok(corps)
+    }
+
     fn connecter(&self) -> Result<TcpStream, String> {
         let adresse = self
             .socks

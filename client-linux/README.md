@@ -183,12 +183,45 @@ TORDNS_MAJ_ETAT=/var/lib/tordns/maj-client.json
 TORDNS_MAJ_BINAIRE=/usr/local/bin/tordns-client
 ```
 
+## DNSSEC et adresses signées (Mission 12)
+
+Le client valide désormais DNSSEC lui-même avec `github.com/miekg/dns` : il
+part de la clé racine IANA (20326), construit la chaîne DS/DNSKEY jusqu'à la
+zone de la question et vérifie les `RRSIG` de la réponse. Une signature fausse
+ou une chaîne rompue donne `SERVFAIL` ; la réponse du nœud n'est jamais
+relayée. Trois modes :
+
+```sh
+TORDNS_DNSSEC=auto    # défaut : refuse le faux, accepte les zones non signées
+TORDNS_DNSSEC=strict  # refuse aussi les zones non signées
+TORDNS_DNSSEC=non     # désactive (déconseillé)
+```
+
+Les preuves de négation NSEC/NSEC3 vérifient bien les signatures présentes,
+mais ne prouvent pas encore cryptographiquement l'absence d'un enregistrement.
+C'est écrit comme non prouvé.
+
+L'adresse n'est plus seulement `-onion` : le client lit le dernier
+`manifeste.json` vérifié déposé par `tordns-client-maj` dans
+`/var/lib/tordns/maj/`. Le réglage `TORDNS_MODE_ADRESSE` vaut `coeur` (défaut),
+`secours` (cœur puis communauté) ou `communaute`. En mode `coeur`, une liste
+sans adresse cœur ne bascule jamais silencieusement sur un bénévole : le
+client retombe sur `TORDNS_ONION`. L'écran et la configuration rappellent que
+les nœuds communauté sont des bénévoles non vérifiés.
+
+```sh
+TORDNS_MODE_ADRESSE=coeur
+TORDNS_ADRESSES=/var/lib/tordns/maj
+TORDNS_ONION=<adresse de secours>
+```
+
 ## Limites
 
-- Le relais **ne valide pas DNSSEC lui-même** : il relaie le bit `AD` calculé
-  par Unbound. Il faut donc faire confiance au serveur, et `options edns0
-  trust-ad` côté système pour propager `AD`. Le refus des réponses non
-  validables est fait par le serveur (SERVFAIL).
+- DNSSEC est validé avec `github.com/miekg/dns` ; la chaîne complète et le
+  rejet d'une adresse altérée sont testés hors ligne. Aucun échange avec les
+  serveurs racine réels n'est exécuté dans les tests.
+- Les preuves de négation NSEC/NSEC3 ne sont pas encore complètes (voir plus
+  haut) ; une zone non signée reste acceptée en mode `auto`.
 - Le cache est volatil (perdu au redémarrage) et non partagé entre instances.
 - Le port 53 de cette machine de test n'est pas ouvrable sans privilège : la
   preuve locale utilise 15353 (5353 est occupé par Avahi/KDE Connect).

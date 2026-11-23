@@ -11,6 +11,10 @@ pub struct Config {
     pub anti_fuite: bool,
     pub ttl_max_s: u64,
     pub delai_s: u64,
+    /// `coeur` (défaut), `secours` (cœur puis communauté) ou `communaute`.
+    pub mode_adresse: String,
+    /// Validation DNSSEC locale (activée par défaut).
+    pub dnssec: bool,
 }
 
 impl Default for Config {
@@ -23,6 +27,8 @@ impl Default for Config {
             anti_fuite: false,
             ttl_max_s: 3600,
             delai_s: 15,
+            mode_adresse: "coeur".into(),
+            dnssec: true,
         }
     }
 }
@@ -64,6 +70,14 @@ impl Config {
                 "anti_fuite" => c.anti_fuite = booléen(valeur)?,
                 "ttl_max" => c.ttl_max_s = valeur.parse().map_err(|_| "ttl_max invalide")?,
                 "delai" => c.delai_s = valeur.parse().map_err(|_| "delai invalide")?,
+                "dnssec" => c.dnssec = booléen(valeur)?,
+                "mode_adresse" => {
+                    let v = valeur.to_ascii_lowercase();
+                    if !matches!(v.as_str(), "coeur" | "secours" | "communaute") {
+                        return Err(format!("mode_adresse invalide : {valeur}"));
+                    }
+                    c.mode_adresse = v;
+                }
                 autre => return Err(format!("clé inconnue : {autre}")),
             }
         }
@@ -101,7 +115,7 @@ mod tests {
     #[test]
     fn configuration_complete() {
         let c = Config::analyser(
-            "# commentaire\nonion = AAAA.onion\nsocks=127.0.0.1:9150\ncache = 128\nanti_fuite = oui\n",
+            "# commentaire\nonion = AAAA.onion\nsocks=127.0.0.1:9150\ncache = 128\nanti_fuite = oui\nmode_adresse = communaute\n",
         )
         .unwrap();
         assert_eq!(c.onion, "aaaa.onion");
@@ -109,6 +123,8 @@ mod tests {
         assert_eq!(c.cache, 128);
         assert!(c.anti_fuite);
         assert_eq!(c.tun, "TorDNS");
+        assert_eq!(c.mode_adresse, "communaute");
+        assert!(c.dnssec);
     }
 
     #[test]
@@ -118,6 +134,7 @@ mod tests {
         assert!(Config::analyser("onion=a.onion\nonion=b.onion\n").is_err());
         assert!(Config::analyser("onion=a.onion\ncache=0\n").is_err());
         assert!(Config::analyser("onion=a.onion\nanti_fuite=peut-être\n").is_err());
+        assert!(Config::analyser("onion=a.onion\nmode_adresse=inconnu\n").is_err());
     }
 
     #[test]

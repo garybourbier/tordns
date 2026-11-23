@@ -147,3 +147,29 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, une instance du contrôleur avec Tor et un VPS
   bénévole pour vérifier la publication du second descripteur et le PROXY v2 ;
   sinon relecture Claude du registre et du format d'inscription.
+
+## Mission 12 — Mises à jour Windows/Android, adresses signées, DNSSEC (23/11/2026)
+
+- **Fait** : vérification du manifeste partagée en Rust entre Windows et Android
+  (`outils/manifeste-rust`), mise à jour Windows (`--maj`, téléchargement par
+  Tor, SHA-256, installateur silencieux, cache de retour arrière, tâche
+  planifiée NSIS) et Android (vérification en arrière-plan, notification,
+  session `PackageInstaller`, même clé APK documentée, piste F-Droid). Liste
+  d'adresses cœur/communauté lue dans le dernier manifeste vérifié, avec modes
+  « cœur seulement » (défaut), « secours » et « communauté » dans les trois
+  clients. DNSSEC validé côté Linux (`miekg/dns`, chaîne DS/DNSKEY depuis la
+  racine), Windows (`hickory-proto`) et Android (`dnsjava`) ; une fausse
+  adresse ou une signature altérée devient SERVFAIL. Preuve
+  `scripts/verifier-m12.sh` : tests Go/Rust/Java, exe Windows croisé et lancé
+  sous Wine, APK v2 signé avec symboles JNI et dnsjava, manifeste signé par
+  l'outil Go accepté par Rust puis rejeu/signature altérée refusés.
+- **Reste / non prouvé** : installation réelle Windows et redémarrage du
+  service (pas de VM Windows), installation réelle de l'APK et session
+  PackageInstaller (pas d'appareil), téléchargements par Tor réels (sources
+  locales), validation DNSSEC contre l'Internet réel (fixtures signées en
+  mémoire), preuves de négation NSEC/NSEC3 complètes côté Linux, rotation de
+  clé sur parc réel, dépôt F-Droid.
+- **Demandé à qui** : à Gary, une VM Windows pour l'installateur/tâche
+  planifiée et un appareil Android pour la session d'installation ; à Claude,
+  une relecture des chemins de retour arrière Windows et de la conservation de
+  la clé APK. Les preuves de négation NSEC/NSEC3 restent à confier à Claude.

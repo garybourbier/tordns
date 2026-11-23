@@ -31,15 +31,18 @@ pub struct Resolveur {
     doh: ClientDoh,
     pub stats: Stats,
     pub onion: String,
+    dnssec: bool,
 }
 
 impl Resolveur {
     pub fn depuis_config(c: &Config) -> Result<Self, String> {
+        let onion = crate::adresses::adresse_effective(c);
         Ok(Self {
             cache: Mutex::new(Cache::new(c.cache, c.ttl_max_s.saturating_mul(1000))),
-            doh: ClientDoh::new(&c.socks, &c.onion, Duration::from_secs(c.delai_s.max(1)))?,
+            doh: ClientDoh::new(&c.socks, &onion, Duration::from_secs(c.delai_s.max(1)))?,
             stats: Stats::default(),
-            onion: c.onion.clone(),
+            onion,
+            dnssec: c.dnssec,
         })
     }
 
@@ -67,7 +70,12 @@ impl Resolveur {
             }
         }
 
-        match self.doh.poster(requete) {
+        let resultat = if self.dnssec {
+            crate::dnssec::resoudre(&self.doh, requete)
+        } else {
+            self.doh.poster(requete).map_err(|e| e.to_string())
+        };
+        match resultat {
             Ok(reponse) if reponse.len() >= 12 && reponse[2] & 0x80 != 0 => {
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.poser(&cle, &reponse, Self::maintenant_ms());

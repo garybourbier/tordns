@@ -11,4 +11,10 @@ javac --release 11 -Xlint:all -Werror -d "$SORTIE" \
     "$RACINE/app/src/main/java/org/tordns/client/Paquet.java" \
     "$RACINE/app/src/main/java/org/tordns/client/Diagnostic.java" \
     "$RACINE/tests/TestLocal.java"
-java -cp "$SORTIE" org.tordns.client.TestLocal
+# Validateur DNSSEC : dnsjava + slf4j sont fournis dans libs/ (aucun réseau).
+javac --release 11 -Xlint:all -Werror -classpath "$RACINE/libs/*" -d "$SORTIE" \
+    "$RACINE/app/src/main/java/org/tordns/client/Dnssec.java" \
+    "$RACINE/app/src/main/java/org/tordns/client/Arti.java" \
+    "$RACINE/tests/TestDnssec.java"
+java -cp "$SORTIE:$RACINE/libs/*" org.tordns.client.TestLocal
+java -cp "$SORTIE:$RACINE/libs/*" org.tordns.client.TestDnssec

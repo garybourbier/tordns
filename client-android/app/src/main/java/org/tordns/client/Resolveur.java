@@ -28,6 +28,7 @@ final class Resolveur {
     private volatile boolean pret = false;
     private volatile String etat = "Tor arrêté";
     private volatile String onion = "";
+    private volatile boolean dnssec = true;
 
     private Resolveur() {}
 
@@ -37,6 +38,10 @@ final class Resolveur {
 
     void configurer(String adresse) {
         onion = adresse == null ? "" : adresse.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    void setDnssec(boolean actif) {
+        dnssec = actif;
     }
 
     boolean pret() {
@@ -130,7 +135,19 @@ final class Resolveur {
                 erreurs.incrementAndGet();
                 return DnsMessage.servfail(requete);
             }
-            byte[] reponse = Arti.doh(onion, requete, 20000);
+            byte[] reponse;
+            if (dnssec) {
+                try {
+                    reponse = Dnssec.valider(onion, requete);
+                } catch (java.io.IOException e) {
+                    // Signature fausse ou chaîne rompue : on ne renvoie surtout
+                    // pas la réponse du nœud, même si elle semble bien formée.
+                    erreurs.incrementAndGet();
+                    return DnsMessage.servfail(requete);
+                }
+            } else {
+                reponse = Arti.doh(onion, requete, 20000);
+            }
             if (reponse == null || reponse.length < 12 || (reponse[2] & 0x80) == 0) {
                 erreurs.incrementAndGet();
                 return DnsMessage.servfail(requete);
