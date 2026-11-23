@@ -17,8 +17,7 @@ DOSSIER_VOLUME="/var/lib/tor/hidden_service"
 SAUVEGARDE="cles-onion"
 
 attendre_service() {
-	local i
-	for i in $(seq 1 60); do
+	for _ in $(seq 1 60); do
 		if docker exec "$CONTENEUR" test -s "$DOSSIER_VOLUME/hostname" 2>/dev/null; then
 			return 0
 		fi

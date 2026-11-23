@@ -88,9 +88,12 @@ pub fn verifier(
     }
     let cle: [u8; 32] = cle.try_into().expect("longueur vérifiée");
     let verifying = VerifyingKey::from_bytes(&cle).map_err(|_| refus("clé publique invalide"))?;
-    let signature: [u8; 64] = signature
-        .try_into()
-        .map_err(|_| refus(format!("signature de taille invalide ({})", signature.len())))?;
+    let signature: [u8; 64] = signature.try_into().map_err(|_| {
+        refus(format!(
+            "signature de taille invalide ({})",
+            signature.len()
+        ))
+    })?;
     verifying
         .verify_strict(brut, &Signature::from_bytes(&signature))
         .map_err(|_| refus("signature invalide"))?;
@@ -193,9 +196,8 @@ fn epoch_rfc3339(texte: &str) -> Option<i64> {
     {
         return None;
     }
-    let nombre = |debut: usize, fin: usize| -> Option<i64> {
-        texte.get(debut..fin)?.parse::<i64>().ok()
-    };
+    let nombre =
+        |debut: usize, fin: usize| -> Option<i64> { texte.get(debut..fin)?.parse::<i64>().ok() };
     let (annee, mois, jour) = (nombre(0, 4)?, nombre(5, 7)?, nombre(8, 10)?);
     let (heure, minute, seconde) = (nombre(11, 13)?, nombre(14, 16)?, nombre(17, 19)?);
     if !(1..=12).contains(&mois)
@@ -211,8 +213,7 @@ fn epoch_rfc3339(texte: &str) -> Option<i64> {
     let a = (14 - mois) / 12;
     let y = annee + 4800 - a;
     let m = mois + 12 * a - 3;
-    let jours = jour + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045
-        - 2_440_588;
+    let jours = jour + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045 - 2_440_588;
     Some(jours * 86_400 + heure * 3_600 + minute * 60 + seconde)
 }
 
@@ -242,10 +243,7 @@ fn adresse_onion(valeur: &str) -> bool {
     let Some(nom) = valeur.strip_suffix(".onion") else {
         return false;
     };
-    nom.len() == 56
-        && nom
-            .bytes()
-            .all(|o| matches!(o, b'a'..=b'z' | b'2'..=b'7'))
+    nom.len() == 56 && nom.bytes().all(|o| matches!(o, b'a'..=b'z' | b'2'..=b'7'))
 }
 
 #[cfg(test)]
@@ -323,13 +321,24 @@ mod tests {
         let mut a = BTreeMap::new();
         a.insert("coeur".to_string(), "c".repeat(56) + ".onion");
         a.insert("communaute".to_string(), "m".repeat(56) + ".onion");
-        assert!(choisir_adresse("coeur", &a, None).unwrap().starts_with("cccc"));
-        assert!(choisir_adresse("secours", &a, None).unwrap().starts_with("cccc"));
-        assert!(choisir_adresse("communaute", &a, None).unwrap().starts_with("mmmm"));
+        assert!(choisir_adresse("coeur", &a, None)
+            .unwrap()
+            .starts_with("cccc"));
+        assert!(choisir_adresse("secours", &a, None)
+            .unwrap()
+            .starts_with("cccc"));
+        assert!(choisir_adresse("communaute", &a, None)
+            .unwrap()
+            .starts_with("mmmm"));
         a.remove("coeur");
         assert_eq!(choisir_adresse("coeur", &a, None), None);
-        assert!(choisir_adresse("secours", &a, None).unwrap().starts_with("mmmm"));
+        assert!(choisir_adresse("secours", &a, None)
+            .unwrap()
+            .starts_with("mmmm"));
         let vide = BTreeMap::new();
-        assert_eq!(choisir_adresse("coeur", &vide, Some("repli.onion")), Some("repli.onion"));
+        assert_eq!(
+            choisir_adresse("coeur", &vide, Some("repli.onion")),
+            Some("repli.onion")
+        );
     }
 }

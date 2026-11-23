@@ -11,7 +11,7 @@
 #   6. client dont le service refuse de redémarrer : binaire précédent rétabli.
 set -euo pipefail
 
-RACINE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d /tmp/tordns-m11.XXXXXX)
 SERVEUR_PID=
 trap 'set +e; [ -n "$SERVEUR_PID" ] && kill "$SERVEUR_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
@@ -285,8 +285,9 @@ grep -q 'tordns-maj.timer' "$RACINE/noeud/installer.sh" ||
     echec "installeur sans timer de mise à jour"
 grep -q 'RandomizedDelaySec=30min' "$RACINE/noeud/tordns-maj.timer" ||
     echec "timer sans décalage aléatoire"
-sh -n "$RACINE/noeud/installer.sh" && sh -n "$RACINE/noeud/desinstaller.sh" ||
+if ! { sh -n "$RACINE/noeud/installer.sh" && sh -n "$RACINE/noeud/desinstaller.sh"; }; then
     echec "syntaxe POSIX de l'installeur"
+fi
 ok "miroir /maj/, timer 6 h à décalage aléatoire, installeur valide"
 
 echo

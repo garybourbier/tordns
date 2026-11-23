@@ -25,7 +25,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match tordns_manifeste::accepter(&brut, &sig, &args[2], version, tordns_manifeste::maintenant()) {
+    match tordns_manifeste::accepter(
+        &brut,
+        &sig,
+        &args[2],
+        version,
+        tordns_manifeste::maintenant(),
+    ) {
         Ok(m) => {
             println!(
                 "OK : manifeste v{} valide, expire le {}, {} adresse(s)",

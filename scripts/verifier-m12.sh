@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1112
 # Preuve de la mission 12 : mises à jour Windows/Android, liste d'adresses
 # signée, validation DNSSEC côté Linux, Windows et Android.
 #

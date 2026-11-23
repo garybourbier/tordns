@@ -94,7 +94,10 @@ mod tests {
             "2030-01-01T00:00:00Z",
             &cle,
         );
-        assert_eq!(choisir(&dossier, &config("repli.onion", "coeur"), &publique), coeur);
+        assert_eq!(
+            choisir(&dossier, &config("repli.onion", "coeur"), &publique),
+            coeur
+        );
         assert_eq!(
             choisir(&dossier, &config("repli.onion", "communaute"), &publique),
             communaute
@@ -116,8 +119,14 @@ mod tests {
             "2020-01-01T00:00:00Z",
             &cle,
         );
-        assert_eq!(choisir(&dossier, &config("repli.onion", "coeur"), &publique), "repli.onion");
+        assert_eq!(
+            choisir(&dossier, &config("repli.onion", "coeur"), &publique),
+            "repli.onion"
+        );
         std::fs::write(dossier.join("manifeste.json"), b"{\"version\":3}").unwrap();
-        assert_eq!(choisir(&dossier, &config("repli.onion", "coeur"), &publique), "repli.onion");
+        assert_eq!(
+            choisir(&dossier, &config("repli.onion", "coeur"), &publique),
+            "repli.onion"
+        );
     }
 }

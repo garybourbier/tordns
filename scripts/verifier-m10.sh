@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1112
 # TorDNS — preuve de la mission 10 : registre et admission communautaire.
 #
 # Tout tourne en local : registre réel (binaire), nœud et résolveur de
@@ -6,8 +7,9 @@
 # pas prouvé est listé au bilan.
 set -eu
 
-RACINE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tordns-m10.XXXXXX")
+code=0
 PORTE=
 trap 'code=$?; [ -n "$PORTE" ] && kill "$PORTE" 2>/dev/null || true; [ -n "${SERVEUR_PY:-}" ] && kill "$SERVEUR_PY" 2>/dev/null || true; rm -rf "$TMP"; exit "$code"' EXIT INT TERM
 

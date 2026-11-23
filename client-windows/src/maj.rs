@@ -47,8 +47,8 @@ impl ConfigMaj {
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
         let dossier = base.join("TorDNS").join("maj");
         let manifeste = std::env::var("TORDNS_MAJ_MANIFESTE").unwrap_or_default();
-        let signature = std::env::var("TORDNS_MAJ_SIGNATURE")
-            .unwrap_or_else(|_| format!("{manifeste}.sig"));
+        let signature =
+            std::env::var("TORDNS_MAJ_SIGNATURE").unwrap_or_else(|_| format!("{manifeste}.sig"));
         Self {
             manifeste_url: manifeste,
             signature_url: signature,
@@ -122,7 +122,10 @@ impl Hote for HoteReel {
     }
 
     fn service_actif(&self) -> bool {
-        let Ok(sortie) = std::process::Command::new("sc").args(["query", "TorDNS"]).output() else {
+        let Ok(sortie) = std::process::Command::new("sc")
+            .args(["query", "TorDNS"])
+            .output()
+        else {
             return false;
         };
         let texte = String::from_utf8_lossy(&sortie.stdout).to_ascii_uppercase();
@@ -199,7 +202,9 @@ fn verrouiller_dossier(dossier: &Path) -> Result<(), String> {
             .map_err(|e| format!("icacls : {e}"))?;
         // /reset sur un dossier vide (aucun fichier pour *) n'est pas une erreur.
         if !statut.success() && args[1] != "/reset" {
-            return Err(format!("verrouillage des droits de {d} impossible ({statut})"));
+            return Err(format!(
+                "verrouillage des droits de {d} impossible ({statut})"
+            ));
         }
     }
     Ok(())
@@ -209,7 +214,11 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
     let etat = lire_etat(&c.etat)?;
     let brut = source.get(&c.manifeste_url, tordns_manifeste::TAILLE_MAX_MANIFESTE)?;
     let sig = source.get(&c.signature_url, 4096)?;
-    let cle = if etat.cle.is_empty() { &c.cle } else { &etat.cle };
+    let cle = if etat.cle.is_empty() {
+        &c.cle
+    } else {
+        &etat.cle
+    };
     let m = tordns_manifeste::accepter(
         &brut,
         &sig,
@@ -293,10 +302,8 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
 
     // Le manifeste et sa signature sont conservés pour la liste d'adresses :
     // ils ne sont écrits qu'après une installation réussie.
-    fs::write(&c.manifeste_cache, &brut)
-        .map_err(|e| format!("cache du manifeste : {e}"))?;
-    fs::write(&c.signature_cache, &sig)
-        .map_err(|e| format!("cache de la signature : {e}"))?;
+    fs::write(&c.manifeste_cache, &brut).map_err(|e| format!("cache du manifeste : {e}"))?;
+    fs::write(&c.signature_cache, &sig).map_err(|e| format!("cache de la signature : {e}"))?;
 
     let mut nouvel = Etat {
         version: m.version,
@@ -342,7 +349,9 @@ fn retour_arriere(
             "version précédente rétablie mais état non écrit : {e} (cause : {cause})"
         ));
     }
-    Err(format!("mise à jour rejetée, version précédente rétablie : {cause}"))
+    Err(format!(
+        "mise à jour rejetée, version précédente rétablie : {cause}"
+    ))
 }
 
 fn lire_etat(chemin: &Path) -> Result<Etat, String> {
@@ -458,7 +467,13 @@ mod tests {
         (c, cle)
     }
 
-    fn source_signee(c: &ConfigMaj, cle: &SigningKey, version: i64, contenu: &[u8], modif_sha: bool) -> FausseSource {
+    fn source_signee(
+        c: &ConfigMaj,
+        cle: &SigningKey,
+        version: i64,
+        contenu: &[u8],
+        modif_sha: bool,
+    ) -> FausseSource {
         let url = "http://exemple.onion/maj/x";
         let sha = if modif_sha {
             "b".repeat(64)
@@ -609,6 +624,4 @@ mod tests {
         assert_eq!(relu.version, 3);
         assert_eq!(relu.cle, "ab");
     }
-
-
 }

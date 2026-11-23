@@ -6,12 +6,34 @@
 !include "x64.nsh"
 
 !define PRODUIT "TorDNS"
-!define VERSION "0.1.0"
+!ifndef VERSION
+    !define VERSION "0.1.0"
+!endif
 !define SERVICE "TorDNS"
 !define REGISTRE_UNINSTALL "Software\Microsoft\Windows\CurrentVersion\Uninstall\TorDNS"
 
-Name "${PRODUIT} ${VERSION}"
-OutFile "TorDNS-${VERSION}-setup.exe"
+; Appelé par scripts/ci/client-windows.sh :
+;   makensis /DARCH=x86_64 /DBINAIRE=... /DWINTUN=... /DSORTIE=... tordns.nsi
+!ifndef ARCH
+    !define ARCH "x86_64"
+!endif
+!ifndef BINAIRE
+    !define BINAIRE "..\dist\client-windows\${ARCH}\tordns-client.exe"
+!endif
+!ifndef WINTUN
+    !define WINTUN "..\dist\client-windows\${ARCH}\wintun.dll"
+!endif
+!ifndef SORTIE
+    !define SORTIE "..\dist\client-windows\${ARCH}\TorDNS-${VERSION}-${ARCH}-setup.exe"
+!endif
+!if "${ARCH}" == "aarch64"
+    !define ATTENDU "Arm64"
+!else
+    !define ATTENDU "X64"
+!endif
+
+Name "${PRODUIT} ${VERSION} (${ARCH})"
+OutFile "${SORTIE}"
 InstallDir "$PROGRAMFILES64\TorDNS"
 InstallDirRegKey HKLM "Software\TorDNS" "InstallDir"
 RequestExecutionLevel admin
@@ -29,12 +51,22 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_LANGUAGE "French"
 
 Section "Client TorDNS" SEC_CLIENT
+    ; Un installateur aarch64 ne doit pas s'installer sur x64, et inversement.
+    ; OSArchitecture décrit le système natif, même sous émulation x64.
+    nsExec::ExecToStack 'powershell -NoProfile -NonInteractive -Command "Write-Host -NoNewline ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"'
+    Pop $0
+    Pop $1
+    StrCmp $1 "${ATTENDU}" architecture_ok
+    MessageBox MB_ICONSTOP "Cet installateur est prévu pour ${ARCH} ; ce système n'est pas ${ATTENDU}."
+    Abort
+    architecture_ok:
+
     ; Une mise à jour lancée par le service doit pouvoir remplacer l'exécutable.
     ExecWait 'sc stop ${SERVICE}'
     Sleep 2000
     SetOutPath "$INSTDIR"
-    File "..\dist\tordns-client.exe"
-    File /nonfatal "..\dist\wintun.dll"
+    File "${BINAIRE}"
+    File "${WINTUN}"
 
     CreateDirectory "$COMMONPROGRAMDATA\TorDNS"
     CreateDirectory "$COMMONPROGRAMDATA\TorDNS\maj"

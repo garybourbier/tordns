@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1112
 # TorDNS — installe un nœud complet sur un Debian 12/13 vierge (Mission 8).
 #
 #   sudo ./noeud/installer.sh
@@ -11,7 +12,7 @@
 set -eu
 
 PROG=$(basename "$0")
-SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SOURCE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 RACINE=/
 UTILISATEUR=tordns
 MAITRESSE=

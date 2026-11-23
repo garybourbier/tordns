@@ -1,0 +1,53 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /client-linux
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /controleur/registre
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /noeud/etat
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /noeud/maj
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /outils/inscription
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /outils/manifeste
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /outils/publier
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /serveur/passerelle
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /client-windows
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /client-android/rust
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /outils/manifeste-rust
+    schedule:
+      interval: weekly

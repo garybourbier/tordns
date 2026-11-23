@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1112
 # TorDNS — génère le config.yaml d'Onionbalance depuis le pool d'instances
 # (Mission 9). Le pool est un fichier texte hors dépôt : une adresse .onion
 # d'instance par ligne, lignes vides et commentaires (#) ignorés.
@@ -9,7 +10,7 @@
 # publiques des instances et le chemin de la clé maîtresse dans le conteneur.
 set -eu
 
-BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BASE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 POOL="$BASE/pools/coeur.txt"
 # Chemin de la clé dans le conteneur Onionbalance (jamais sur l'hôte en clair

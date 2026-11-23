@@ -101,8 +101,7 @@ mod tests {
             nom.clone(),
             vec![],
         );
-        let sig: Record<RRSIG> =
-            Record::from_rdata(nom.clone(), rrset[0].ttl(), rrsig.clone());
+        let sig: Record<RRSIG> = Record::from_rdata(nom.clone(), rrset[0].ttl(), rrsig.clone());
         let tbs = tbs::rrset_tbs_with_rrsig(&sig, &rrset).unwrap();
         let octets = signer.sign(&tbs).unwrap();
         let signee = RRSIG::new(
@@ -133,14 +132,10 @@ mod tests {
     }
 
     impl DnsHandle for FauxHandle {
-        type Response =
-            Pin<Box<dyn Stream<Item = Result<DnsResponse, ProtoError>> + Send + Unpin>>;
+        type Response = Pin<Box<dyn Stream<Item = Result<DnsResponse, ProtoError>> + Send + Unpin>>;
         type Error = ProtoError;
 
-        fn send<R: Into<DnsRequest> + Unpin + Send + 'static>(
-            &self,
-            request: R,
-        ) -> Self::Response {
+        fn send<R: Into<DnsRequest> + Unpin + Send + 'static>(&self, request: R) -> Self::Response {
             let q = request.into();
             let question = q.queries().first().cloned().unwrap();
             let brut = if question.query_type() == RecordType::DNSKEY {
@@ -197,18 +192,12 @@ mod tests {
             RData::A(hickory_proto::rr::rdata::A::new(192, 0, 2, 1)),
         );
         let mut reponse = Message::new();
-        reponse.add_query(hickory_proto::op::Query::query(
-            zone.clone(),
-            RecordType::A,
-        ));
+        reponse.add_query(hickory_proto::op::Query::query(zone.clone(), RecordType::A));
         reponse.add_answer(a.clone());
         reponse.add_answer(record_signe(&zone, vec![a], &signer));
 
-        let publique = PublicKeyEnum::from_public_bytes(
-            dnskey.public_key(),
-            Algorithm::ED25519,
-        )
-        .unwrap();
+        let publique =
+            PublicKeyEnum::from_public_bytes(dnskey.public_key(), Algorithm::ED25519).unwrap();
         let mut ancre = TrustAnchor::new();
         ancre.insert_trust_anchor(&publique);
         (

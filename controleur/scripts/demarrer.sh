@@ -8,7 +8,7 @@
 # retirer un nœud : éditer le pool, relancer ce script.
 set -eu
 
-BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BASE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 POOL="$BASE/pools/coeur.txt"
 

@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC1112
 # TorDNS — désinstallation du nœud (Mission 8).
 #
 # Retire le service, les conteneurs, le code et la commande d'adresse.
@@ -8,7 +9,6 @@
 set -eu
 
 PROG=$(basename "$0")
-SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RACINE=/
 SUPPRIMER_CLES=0
 SANS_SYSTEMD=0

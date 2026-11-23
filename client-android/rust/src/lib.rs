@@ -218,7 +218,9 @@ fn telecharger_bloquant(onion: &str, chemin: &str, max: usize) -> Result<Vec<u8>
             flux.write_all(entete.as_bytes())
                 .await
                 .map_err(|e| format!("écriture HTTP : {e}"))?;
-            flux.flush().await.map_err(|e| format!("écriture HTTP : {e}"))?;
+            flux.flush()
+                .await
+                .map_err(|e| format!("écriture HTTP : {e}"))?;
 
             let mut tampon = Vec::with_capacity(4096);
             let mut bloc = [0u8; 4096];

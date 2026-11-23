@@ -23,6 +23,8 @@ import (
 	"time"
 )
 
+var version = "dev"
+
 type config struct {
 	ecoute      string
 	socks       string
@@ -86,7 +88,12 @@ func chargerConfig() config {
 	flag.StringVar(&cfg.dnssec, "dnssec", cfg.dnssec, "validation DNSSEC : non, auto ou strict")
 	flag.StringVar(&cfg.modeAdresse, "mode-adresse", cfg.modeAdresse, "adresse : coeur, secours ou communaute")
 	flag.StringVar(&cfg.adresses, "adresses", cfg.adresses, "dossier du manifeste d'adresses vérifié")
+	afficherVersion := flag.Bool("version", false, "affiche la version et quitte")
 	flag.Parse()
+	if *afficherVersion {
+		fmt.Printf("tordns-client %s\n", version)
+		os.Exit(0)
+	}
 	cfg.ttlMax = time.Duration(*ttlMax) * time.Second
 	cfg.delai = *delai
 	return cfg

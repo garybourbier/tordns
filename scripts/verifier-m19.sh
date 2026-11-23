@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1112
 # TorDNS — preuve de la mission 19 : restes de la relecture du 23/11.
 #
 # 1. Sonde du registre : intersection d'adresses, doute non signé compté par
@@ -10,7 +11,7 @@
 # Tout est local : aucun Tor, aucun serveur de Gary, aucun secret.
 set -euo pipefail
 
-RACINE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+RACINE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/tordns-m19.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 

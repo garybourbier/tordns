@@ -14,7 +14,7 @@
 # La sauvegarde chiffrée est décrite dans docs/redondance.md.
 set -eu
 
-BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BASE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 NOM=maitresse
 

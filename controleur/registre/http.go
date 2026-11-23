@@ -184,7 +184,7 @@ func (r *registre) getPage(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = pageModele.Execute(w, struct {
-		Admis      []ligne
+		Admis       []ligne
 		Quarantaine string
 	}{lignes, dureeCourte(r.cfg.Quarantaine)})
 }

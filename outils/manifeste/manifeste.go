@@ -41,12 +41,12 @@ type Cible struct {
 // Manifeste est le contenu signé. Les clés JSON sont stables : le fichier est
 // signé tel quel, les outils ne le réécrivent jamais après signature.
 type Manifeste struct {
-	Version     int64            `json:"version"`
-	Expire      string           `json:"expire"`
-	Cibles      map[string]Cible `json:"cibles"`
+	Version     int64             `json:"version"`
+	Expire      string            `json:"expire"`
+	Cibles      map[string]Cible  `json:"cibles"`
 	Images      map[string]string `json:"images,omitempty"`
 	Adresses    map[string]string `json:"adresses,omitempty"`
-	CleSuivante string           `json:"cle_suivante,omitempty"`
+	CleSuivante string            `json:"cle_suivante,omitempty"`
 }
 
 var (

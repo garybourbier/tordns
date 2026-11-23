@@ -87,6 +87,7 @@ resultat="$(printf 'example.com A\n%.0s' $(seq 1 100) |
 	awk '/Query time:/ { n++; v=$(NF-1); somme+=v; if (v>max) max=v }
 	     END { if (n==0) { print "0 0 0"; exit }
 	           printf "%d %.3f %d\n", n, somme/n, max }')"
+# shellcheck disable=SC2086
 set -- $resultat
 nb="$1"; moyenne="$2"; maximum="$3"
 echo "Lot de $nb requêtes mises en cache : moyenne ${moyenne} ms, maximum ${maximum} ms."

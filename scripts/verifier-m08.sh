@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1112
 # Preuves de la mission 8 : nœud installable en une commande.
 #
 # Installation réelle dans un bac à sable jetable (racine temporaire) sur le
@@ -13,7 +14,6 @@ set -euo pipefail
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d /tmp/tordns-m08.XXXXXX)"
 BAC="$TMP/bac"
-PROJET=tordns-noeud
 
 nettoyer() {
     if [ -f "$BAC/opt/tordns/.env" ]; then

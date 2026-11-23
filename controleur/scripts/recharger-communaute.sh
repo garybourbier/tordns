@@ -9,7 +9,7 @@
 # admission ou une éviction est donc publiée en au plus deux minutes.
 set -eu
 
-BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+BASE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 POOL="$DONNEES/pools/communaute.txt"
 CLE=/donnees/communaute.key
