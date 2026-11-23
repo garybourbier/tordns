@@ -31,7 +31,7 @@ services:
   unbound:
     build:
       context: ../serveur/unbound
-    image: tordns/unbound:local
+    image: ${TORDNS_IMAGE_UNBOUND:-tordns/unbound:local}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-unbound
     restart: unless-stopped
     <<: *durcissement
@@ -62,7 +62,7 @@ services:
   passerelle:
     build:
       context: ../serveur/passerelle
-    image: tordns/passerelle:local
+    image: ${TORDNS_IMAGE_PASSERELLE:-tordns/passerelle:local}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-passerelle
     restart: unless-stopped
     <<: *durcissement
@@ -97,7 +97,7 @@ services:
   etat:
     build:
       context: ./etat
-    image: tordns/etat:local
+    image: ${TORDNS_IMAGE_ETAT:-tordns/etat:local}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-etat
     restart: unless-stopped
     <<: *durcissement
@@ -172,7 +172,7 @@ services:
   tor:
     build:
       context: ./tor
-    image: tordns/noeud-tor:local
+    image: ${TORDNS_IMAGE_TOR:-tordns/noeud-tor:local}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-tor
     restart: unless-stopped
     <<: *durcissement
@@ -204,7 +204,7 @@ services:
   maj-tor:
     build:
       context: ../serveur/tor-client
-    image: tordns/tor-client:test
+    image: ${TORDNS_IMAGE_TOR_CLIENT:-tordns/tor-client:test}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-maj-tor
     profiles: ["maj"]
     restart: "no"
@@ -224,7 +224,7 @@ services:
   tor-client:
     build:
       context: ../serveur/tor-client
-    image: tordns/tor-client:test
+    image: ${TORDNS_IMAGE_TOR_CLIENT:-tordns/tor-client:test}
     container_name: ${TORDNS_PREFIXE:-tordns-noeud}-tor-client
     profiles: ["test"]
     restart: "no"

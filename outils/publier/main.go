@@ -128,6 +128,9 @@ func commandeManifeste(args []string) error {
 	var images liste
 	var adresses liste
 	cleSuivante := fs.String("cle-suivante", "", "clé publique annoncée pour la rotation suivante")
+	depuisRelease := fs.String("depuis-release", "", "tag vX.Y.Z ou dossier de release à lire (SHA256SUMS, images.txt)")
+	baseURL := fs.String("base-url", "", "URL de base des fichiers (défaut : release GitHub du tag)")
+	attestations := fs.Bool("attestations", false, "vérifie chaque fichier avec gh attestation verify")
 	fs.Var(&cibles, "cible", "nom=chemin,url : fichier local et URL publiée (répétable)")
 	fs.Var(&images, "image", "nom=sha256:… : empreinte d'image Docker (répétable)")
 	fs.Var(&adresses, "adresse", "nom=….onion : adresse publique (répétable)")
@@ -158,23 +161,34 @@ func commandeManifeste(args []string) error {
 		Adresses:    map[string]string{},
 		CleSuivante: strings.TrimSpace(*cleSuivante),
 	}
-	for _, spec := range cibles {
-		nom, chemin, url, err := decouperCible(spec)
+	if *depuisRelease != "" {
+		if len(cibles) > 0 || len(images) > 0 {
+			return errors.New("--depuis-release est exclusif de --cible et --image")
+		}
+		var err error
+		m.Cibles, m.Images, err = manifesteDepuisRelease(*depuisRelease, *baseURL, *attestations)
 		if err != nil {
 			return err
 		}
-		taille, somme, err := empreinteFichier(chemin)
-		if err != nil {
-			return err
+	} else {
+		for _, spec := range cibles {
+			nom, chemin, url, err := decouperCible(spec)
+			if err != nil {
+				return err
+			}
+			taille, somme, err := empreinteFichier(chemin)
+			if err != nil {
+				return err
+			}
+			m.Cibles[nom] = manifeste.Cible{URL: url, Taille: taille, SHA256: somme}
 		}
-		m.Cibles[nom] = manifeste.Cible{URL: url, Taille: taille, SHA256: somme}
-	}
-	for _, spec := range images {
-		nom, valeur, ok := strings.Cut(spec, "=")
-		if !ok || nom == "" {
-			return fmt.Errorf("--image attend nom=sha256:… : %q", spec)
+		for _, spec := range images {
+			nom, valeur, ok := strings.Cut(spec, "=")
+			if !ok || nom == "" {
+				return fmt.Errorf("--image attend nom=sha256:… : %q", spec)
+			}
+			m.Images[nom] = valeur
 		}
-		m.Images[nom] = valeur
 	}
 	for _, spec := range adresses {
 		nom, valeur, ok := strings.Cut(spec, "=")

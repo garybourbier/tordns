@@ -24,6 +24,7 @@ SANS_ATTENTE=0
 SANS_MAJ=0
 CLE_MAJ=
 REJOINDRE=
+IMAGES=${TORDNS_IMAGES:-locale}
 
 usage() {
 	cat <<EOF
@@ -42,6 +43,8 @@ Usage : sudo ./$PROG [options]
   --sans-systemd         ne pas activer l'unité systemd (démarrage direct)
   --sans-attente         ne pas attendre la publication du service caché
   --sans-maj             ne pas construire tordns-maj (hors ligne, tests)
+  --images <locale|ghcr> images construites localement (défaut) ou tirées de
+                         GHCR par empreinte depuis noeud/images.txt
   --cle-maj <hex>        clé publique Ed25519 de publication compilée dans
                          tordns-maj (32 octets en hexadécimal)
   --rejoindre <adresse>  demande l'admission dans le pool communauté via le
@@ -89,6 +92,11 @@ while [ $# -gt 0 ]; do
 	--sans-systemd) SANS_SYSTEMD=1; shift ;;
 	--sans-attente) SANS_ATTENTE=1; shift ;;
 	--sans-maj) SANS_MAJ=1; shift ;;
+	--images)
+		[ $# -ge 2 ] || die "--images exige locale ou ghcr"
+		IMAGES=$2
+		shift 2
+		;;
 	--cle-maj)
 		[ $# -ge 2 ] || die "--cle-maj exige une clé hexadécimale"
 		CLE_MAJ=$2
@@ -130,6 +138,10 @@ printf '%s' "$PREFIXE" | grep -Eq '^[a-z0-9][a-z0-9-]{0,40}$' ||
 	die "préfixe invalide (minuscules, chiffres et tirets attendus) : $PREFIXE"
 printf '%s' "$SOUS_RESEAU" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' ||
 	die "sous-réseau invalide (a.b.c attendu) : $SOUS_RESEAU"
+case $IMAGES in
+locale | ghcr) ;;
+*) die "--images attend locale ou ghcr : $IMAGES" ;;
+esac
 [ -f "$SOURCE/docker-compose.yml" ] || die "docker-compose.yml introuvable à côté de $PROG"
 [ -f "$SOURCE/../serveur/unbound/unbound.conf" ] || die "dossier serveur/ introuvable : lancez l'installeur depuis un clone du dépôt"
 [ -f "$SOURCE/VERSION" ] || die "fichier VERSION introuvable"
@@ -357,6 +369,24 @@ definir TORDNS_PREFIXE "$PREFIXE"
 definir TORDNS_SOUS_RESEAU "$SOUS_RESEAU"
 definir TORDNS_TOR_UID "$TOR_UID"
 definir TORDNS_TOR_GID "$TOR_GID"
+definir TORDNS_IMAGES "$IMAGES"
+if [ "$IMAGES" = ghcr ]; then
+	IMAGES_FICHIER="$CODE/noeud/images.txt"
+	[ -f "$IMAGES_FICHIER" ] || die "images.txt absent pour --images ghcr (à côté de noeud/)"
+	while IFS='=' read -r slug ref; do
+		case $slug in
+		serveur-unbound) definir TORDNS_IMAGE_UNBOUND "$ref" ;;
+		serveur-passerelle) definir TORDNS_IMAGE_PASSERELLE "$ref" ;;
+		noeud-etat) definir TORDNS_IMAGE_ETAT "$ref" ;;
+		noeud-tor) definir TORDNS_IMAGE_TOR "$ref" ;;
+		serveur-tor-client) definir TORDNS_IMAGE_TOR_CLIENT "$ref" ;;
+		esac
+	done <"$IMAGES_FICHIER"
+	for cle in TORDNS_IMAGE_UNBOUND TORDNS_IMAGE_PASSERELLE TORDNS_IMAGE_ETAT TORDNS_IMAGE_TOR TORDNS_IMAGE_TOR_CLIENT; do
+		grep -q "^$cle=." "$ENV_FILE" || die "image $cle absente de $IMAGES_FICHIER"
+	done
+	ok "images GHCR épinglées par empreinte"
+fi
 chmod 0600 "$ENV_FILE"
 ok "$ENV_FILE"
 
@@ -378,8 +408,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=$CODE/noeud
-ExecStart=$COMPOSE --env-file $ENV_FILE up -d --remove-orphans
-ExecReload=$COMPOSE --env-file $ENV_FILE up -d --remove-orphans
+ExecStart=$COMPOSE --env-file $ENV_FILE up -d --no-build --remove-orphans
+ExecReload=$COMPOSE --env-file $ENV_FILE up -d --no-build --remove-orphans
 ExecStop=$COMPOSE --env-file $ENV_FILE down
 TimeoutStartSec=0
 
@@ -478,6 +508,13 @@ else
 fi
 
 construire() {
+	if [ "$IMAGES" = ghcr ]; then
+		# Aucune construction : les empreintes de images.txt désignent les
+		# images multi-arch publiées par la release.
+		# shellcheck disable=SC2086
+		(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" pull --quiet)
+		return
+	fi
 	# Reconstruit les images à partir du code copié : une mise à jour du dépôt
 	# doit changer le comportement du nœud, pas seulement ses conteneurs.
 	# shellcheck disable=SC2086
@@ -486,9 +523,9 @@ construire() {
 
 demarrer() {
 	# shellcheck disable=SC2086
-	(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" up -d --remove-orphans)
+	(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" up -d --no-build --remove-orphans)
 }
-info "Construction des images"
+info "Images : $IMAGES"
 construire
 
 if [ "$SANS_SYSTEMD" -eq 1 ] || [ "$RACINE" != / ]; then

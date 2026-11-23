@@ -31,6 +31,25 @@ construction de `tordns-maj`.
 
 ## 2. Publier une version
 
+Depuis une release GitHub (recommandé, mission 16) :
+
+```bash
+./tordns-signer manifeste --depuis-release v0.8.0 \
+    --dossier ~/tordns-cles --version 2 \
+    --adresse coeur=<adresse maîtresse>.onion \
+    --sortie ./publication
+```
+
+`--depuis-release` télécharge la release brouillon avec `gh`, vérifie chaque
+fichier avec `SHA256SUMS`, lit les empreintes dans `images.txt` et construit
+les URLs de la release. Ajouter `--attestations` pour exiger en plus
+`gh attestation verify` sur chaque fichier. Un dossier local est aussi
+accepté (`--depuis-release ./release-v0.8.0 --base-url https://…`) ; les
+attestations sont alors désactivées par défaut. La procédure complète est
+[docs/publier-une-version.md](../../docs/publier-une-version.md).
+
+Construction manuelle :
+
 ```bash
 ./tordns-signer manifeste \
     --dossier ~/tordns-cles \
