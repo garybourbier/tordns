@@ -21,3 +21,6 @@ serveur/tor/hidden_service*/
 # Pool et données du contrôleur Onionbalance (Mission 9)
 controleur/pools/*.txt
 !controleur/pools/coeur.txt.example
+
+# Artefacts de compilation locaux et de CI
+dist/
