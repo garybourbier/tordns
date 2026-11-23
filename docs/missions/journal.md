@@ -238,3 +238,25 @@ Une entrée par mission : fait, reste, demandé à qui.
   service est retentée à chaque passage du minuteur.
 - **Demandé à qui** : à Gary, une VM Windows pour vérifier les droits de
   `maj\` après installation.
+
+## Mission 19 — Restes de la relecture du 23/11 (23/11/2026)
+
+- **Fait** : la sonde du registre accepte désormais une intersection d'adresses
+  A (CDN et tourniquets), refuse un RCODE ou un bit AD différent, et traite un
+  ensemble disjoint comme un mensonge sur une réponse signée mais comme un
+  simple doute sur une réponse non signée. Les doutes sont comptés sur des
+  domaines distincts, conservés sous forme d'empreintes (aucun nom dans l'état
+  public) et disqualifient au seuil configurable `-doutes-max` (3 par défaut).
+  Les trois mécanismes de mise à jour retiennent la version rejetée
+  (`rejetee: N`) : le client Linux et le nœud après un retour arrière, le client
+  Windows après le relancement de l'installateur précédent ; une version
+  supérieure est toujours essayée. Preuve `scripts/verifier-m19.sh` : tests Go
+  et Rust ciblés, puis M10, M11 et M12 rejouées vertes.
+- **Reste / non prouvé** : les CDN et tourniquets réels, l'Internet réel
+  (`dnssec-failed.org` est imité localement), le seuil de doutes sur un parc
+  réel, un redémarrage systemd réel, un service Windows réel et ses droits
+  NTFS, le transport Tor des mises à jour. Les tests d'installation utilisent
+  un serveur HTTP local et un `systemctl` factice.
+- **Demandé à qui** : à Gary, un essai contre quelques domaines CDN réels et
+  une VM Windows pour le service ; à Claude, une relecture du seuil de doutes
+  et de la conservation de `rejetee` après un retour arrière.
