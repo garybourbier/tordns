@@ -393,3 +393,30 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, lancer une fois le workflow Fuzz à la main et
   conserver les corpus s'ils grossissent ; à Claude, relire les cibles Rust et
   la classification des entrées non valides.
+
+## Mission 21 — Compilations reproductibles (24/11/2026)
+
+- **Fait** : Go est forcé à 1.23.7 par `GOTOOLCHAIN=go1.23.7` et
+  `toolchain go1.23.7` (Linux, macOS), Rust à 1.96.1 par
+  `client-windows/rust-toolchain.toml`, et les bases Docker sont épinglées par
+  empreinte. Linux utilise `-buildvcs=false`, `ar rcsD`, `tar --mtime` et
+  `gzip -n` ; Windows ajoute `--locked`, le remappage des chemins, un
+  horodatage PE normalisé (`pe-timestamp.py`) et `touch` des entrées NSIS ;
+  Android trie les entrées ZIP et les date avec `SOURCE_DATE_EPOCH`. Les APK
+  publiés sont désormais réellement non signés (`-NON-SIGNE-POUR-PUBLICATION`),
+  la copie debug restant séparée. `scripts/ci/reproduire.sh` et
+  `docs/reproduire.md` reconstruisent le tag en conteneur et documentent les
+  limites. Preuve `./scripts/verifier-m21.sh` : deux constructions successives
+  donnent les mêmes octets pour Linux, Windows x86_64 et les quatre APK ;
+  `./scripts/ci/lint.sh` est vert. M14, M15 et M19 ont été rejouées vertes
+  après ces changements.
+- **Reste / non prouvé** : macOS et le `.pkg`, la signature Developer ID et la
+  notarisation, les images multi-arch (Buildx local sans
+  `--rewrite-timestamp`), et l'exécution réelle des workflows CI/release. Aucun
+  tag n'a été créé ni poussé ; `reproduire.sh` n'a donc pas été lancé sur un
+  tag. Les empreintes des images de base et de Go/Rust devront être vérifiées
+  lors du premier passage CI.
+- **Demandé à qui** : à Gary, pousser un tag et lancer la CI/release pour
+  confirmer la reproductibilité sur macOS, les images multi-arch et le runner
+  Windows ; à Claude, relire `reproduire.sh`, `pe-timestamp.py` et les
+  Dockerfiles épinglés.
