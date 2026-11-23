@@ -123,7 +123,7 @@ section "5. DNSSEC : trois validateurs, réponse menteuse refusée"
 sortie_android="$(cd "$RACINE/client-android" && ./scripts/tester.sh)"
 grep -q "DNSSEC Android" <<<"$sortie_android" ||
     echec "tests DNSSEC Android absents"
-ok "chaîne valide acceptée, réponse altérée et ancre invalide refusées (Go, Rust, Java)"
+ok "chaînes valides et négations NSEC/NSEC3 acceptées ; réponses altérées, preuves incomplètes et ancre invalide refusées (Go, Rust, Java)"
 
 section "6. Bilan"
 cat <<'BILAN'
@@ -135,8 +135,8 @@ réelle de l’APK et la session PackageInstaller sur un appareil (l’APK est
 construit et signé, les classes sont testées sur JVM) ; le téléchargement par
 Tor des mises à jour (les tests utilisent des sources locales) ; la validation
 DNSSEC contre les serveurs racine et les zones réelles d’Internet (les chaînes
-sont des fixtures signées en mémoire) ; les preuves de négation NSEC/NSEC3
-côté Linux ne sont pas complètes ; la rotation de clé n’est pas exercée sur un
-parc réel ; la publication d’un dépôt F-Droid n’est pas testée.
+sont des fixtures signées en mémoire, y compris les négations NSEC/NSEC3) ; la
+rotation de clé n’est pas exercée sur un parc réel ; la publication d’un dépôt
+F-Droid n’est pas testée.
 BILAN
 printf 'code=0\n'

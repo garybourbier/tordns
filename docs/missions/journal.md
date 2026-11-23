@@ -197,3 +197,22 @@ Une entrée par mission : fait, reste, demandé à qui.
   inchangées.
 - **Demandé à qui** : à Gary, un second hôte pour M09 et une VM Windows/appareil
   Android pour M12 ; à Claude, la relecture des preuves de négation NSEC/NSEC3.
+
+## DNSSEC Linux : négation NSEC/NSEC3 (23/11/2026)
+
+- **Fait** : le validateur Linux suit désormais uniquement les vraies
+  délégations (un DS absent sur un nom d'hôte ne fait plus passer la zone pour
+  non signée) et vérifie les preuves de négation : NXDOMAIN avec absence du nom
+  et du wildcard, NODATA au nom ou via un wildcard, délégation sans DS par NSEC
+  ou NSEC3 opt-out. Les RRset non signés ajoutés à une réponse signée sont
+  refusés ; une cible de CNAME située dans une zone non signée reste acceptée
+  en mode `auto`. Les tests couvrent aussi un nom d'hôte, un NSEC3 qui annonce
+  le type demandé, un NXDOMAIN sans preuve de wildcard et une injection de
+  RRset non signé.
+- **Reste / non prouvé** : les fixtures sont générées en mémoire, aucun échange
+  avec les racines ou les zones réelles n'est exécuté ici ; le cas NSEC3
+  opt-out d'un nom vide non terminal peut être classé comme délégation non
+  signée (comportement conservateur, à confirmer sur des zones réelles).
+- **Demandé à qui** : à Claude, relecture des preuves de négation et de la
+  classification opt-out ; à Gary, un essai contre quelques zones signées
+  réelles (NSEC et NSEC3) avant diffusion.

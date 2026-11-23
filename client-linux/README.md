@@ -197,9 +197,11 @@ TORDNS_DNSSEC=strict  # refuse aussi les zones non signées
 TORDNS_DNSSEC=non     # désactive (déconseillé)
 ```
 
-Les preuves de négation NSEC/NSEC3 vérifient bien les signatures présentes,
-mais ne prouvent pas encore cryptographiquement l'absence d'un enregistrement.
-C'est écrit comme non prouvé.
+Les preuves de négation sont vérifiées : NXDOMAIN avec absence du nom et du
+wildcard, NODATA au nom ou via un wildcard, et délégation sans DS (NSEC, ou
+NSEC3 opt-out). La chaîne ne suit que les vraies délégations : l'absence de DS
+sur un simple nom d'hôte ne fait plus passer la zone pour non signée. Une
+preuve absente ou qui annonce le type demandé est refusée.
 
 L'adresse n'est plus seulement `-onion` : le client lit le dernier
 `manifeste.json` vérifié déposé par `tordns-client-maj` dans
@@ -220,8 +222,10 @@ TORDNS_ONION=<adresse de secours>
 - DNSSEC est validé avec `github.com/miekg/dns` ; la chaîne complète et le
   rejet d'une adresse altérée sont testés hors ligne. Aucun échange avec les
   serveurs racine réels n'est exécuté dans les tests.
-- Les preuves de négation NSEC/NSEC3 ne sont pas encore complètes (voir plus
-  haut) ; une zone non signée reste acceptée en mode `auto`.
+- Les preuves de négation NSEC/NSEC3 sont testées avec des fixtures signées
+  en mémoire, y compris NSEC3 opt-out ; aucun échange avec les racines ou les
+  zones réelles n'est exécuté. Une zone non signée reste acceptée en mode
+  `auto`.
 - Le cache est volatil (perdu au redémarrage) et non partagé entre instances.
 - Le port 53 de cette machine de test n'est pas ouvrable sans privilège : la
   preuve locale utilise 15353 (5353 est occupé par Avahi/KDE Connect).
