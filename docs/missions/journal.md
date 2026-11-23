@@ -332,3 +332,26 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, pousser le premier tag et contrôler le brouillon
   et GHCR ; à Claude, relire `release-assembler.sh` et `images-release.sh` au
   premier passage réel.
+
+## Mission 17 — Site de présentation sur GitHub Pages (23/11/2026)
+
+- **Fait** : `site/` contient une page française et une page anglaise
+  complètes, du CSS local, un schéma SVG et un petit script de mise en avant de
+  la plateforme, sans cookie, stockage, police distante ni traceur. Les 13
+  noms de téléchargements viennent de `site/telechargements.json`, aussi
+  utilisé par `release-locale.sh` et `release-assembler.sh`. Les liens pointent
+  vers `releases/latest/download/`, avec `SHA256SUMS` et la commande
+  `gh attestation verify`. `.github/workflows/pages.yml` génère puis déploie
+  `site/` sur `master` avec `pages: write` et `id-token: write` sur le seul job
+  de déploiement. `SECURITY.md` ne donne aucune adresse personnelle et renvoie
+  au signalement privé GitHub. `scripts/verifier-m17.sh` vérifie les liens, les
+  URLs (toutes github.com), l'absence de traceur, la génération idempotente et
+  capture les deux pages à 360 et 1280 px : aucun débordement horizontal.
+- **Reste / non prouvé** : la page en ligne, car Gary doit activer Pages avec
+  la source « GitHub Actions » dans les réglages du dépôt. `tidy`/`vnu` ne sont
+  pas installés ici ; la validation HTML se limite à l'analyseur Python et au
+  rendu Chromium. Les captures utilisent `scripts/ci/site-capture.py` et
+  `websocket-client` (présent localement).
+- **Demandé à qui** : à Gary, activer Pages et vérifier l'URL publiée ; à
+  Claude, relire les textes de sécurité et les liens de téléchargement au
+  premier déploiement.
