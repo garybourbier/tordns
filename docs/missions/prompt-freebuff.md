@@ -1,6 +1,7 @@
 # Prompt à coller dans Freebuff (une mission par session)
 
-Remplacer NN par le numéro de la mission (ordre : 07, 13, 08, 09, 11, 10, 12).
+Remplacer NN par le numéro de la mission.
+Chantier 3 (en cours) : ordre 19, 14, 15, 16, 17, 18. Chantier 2 (fait) : 07, 13, 08, 09, 11, 10, 12.
 
 ```text
 Tu travailles dans le dépôt TorDNS (~/Projets/tordns). Lis d'abord AGENTS.md, puis

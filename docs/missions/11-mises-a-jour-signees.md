@@ -8,7 +8,7 @@ client Linux s'y mettent seuls, sans jamais accepter un fichier non signé ou pl
 - `outils/publier/` (Go, sans dépendance réseau) :
   - `tordns-signer cle` : crée la paire Ed25519 de publication **dans un dossier choisi par
     Gary** (jamais dans le dépôt) ;
-  - `tordns-signer manifeste` : construit `manifeste.json` (format dans `00-lire-moi.md` :
+  - `tordns-signer manifeste` : construit `manifeste.json` (format dans `chantier-2-cadrage.md` :
     version entière croissante, expiration, cibles avec URL / taille / SHA-256, empreintes des
     images Docker des nœuds, liste des adresses cœur et communauté) et `manifeste.json.sig` ;
   - `tordns-signer verifier` : contrôle hors ligne.
