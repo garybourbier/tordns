@@ -157,9 +157,49 @@ pub fn executer_reel(chemin_config: &Path) -> Result<(), String> {
     if c.onion.is_empty() {
         return Err("adresse .onion absente de la configuration".into());
     }
+    // Défense en profondeur (relecture du 23/11) : on ne fait confiance à maj\ (état, clé de
+    // rotation, installateurs) qu'après avoir re-verrouillé ses droits nous-mêmes, en SYSTEM.
+    let racine = c
+        .etat
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| "dossier TorDNS introuvable".to_string())?;
+    verrouiller_dossier(racine)?;
     let doh = ClientDoh::new(&c.socks, &c.onion, c.delai)?;
     let source = TorSource { doh };
     appliquer(&c, &source, &HoteReel)
+}
+
+/// Propriétaire Administrateurs, héritage coupé, écriture SYSTEM/Administrateurs seulement.
+/// Un fichier posé par un utilisateur avant le verrouillage perd ainsi ses droits de
+/// propriétaire. Échec = pas de mise à jour.
+fn verrouiller_dossier(dossier: &Path) -> Result<(), String> {
+    let d = dossier.to_string_lossy().to_string();
+    let etoile = format!("{}\\*", d.trim_end_matches('\\'));
+    let etapes: [Vec<&str>; 3] = [
+        vec![&d, "/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"],
+        vec![
+            &d,
+            "/inheritance:r",
+            "/grant:r",
+            "*S-1-5-18:(OI)(CI)F",
+            "*S-1-5-32-544:(OI)(CI)F",
+            "*S-1-5-32-545:(OI)(CI)RX",
+            "/Q",
+        ],
+        vec![&etoile, "/reset", "/T", "/C", "/Q"],
+    ];
+    for args in etapes.iter() {
+        let statut = std::process::Command::new("icacls")
+            .args(args)
+            .status()
+            .map_err(|e| format!("icacls : {e}"))?;
+        // /reset sur un dossier vide (aucun fichier pour *) n'est pas une erreur.
+        if !statut.success() && args[1] != "/reset" {
+            return Err(format!("verrouillage des droits de {d} impossible ({statut})"));
+        }
+    }
+    Ok(())
 }
 
 fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), String> {
@@ -205,8 +245,20 @@ fn appliquer(c: &ConfigMaj, source: &dyn Source, hote: &dyn Hote) -> Result<(), 
         .ok_or_else(|| "chemin d'installateur sans dossier".to_string())?;
     fs::create_dir_all(dossier).map_err(|e| format!("création de {} : {e}", dossier.display()))?;
     let temporaire = c.installateur.with_extension("nouveau.exe");
-    fs::write(&temporaire, &nouveau)
-        .map_err(|e| format!("écriture de {} : {e}", temporaire.display()))?;
+    // Jamais réécrire un fichier déjà là (il pourrait appartenir à un autre que nous) :
+    // on le supprime puis on crée un fichier neuf, en exclusivité.
+    let _ = fs::remove_file(&temporaire);
+    {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporaire)
+            .map_err(|e| format!("création de {} : {e}", temporaire.display()))?;
+        f.write_all(&nouveau)
+            .and_then(|_| f.sync_all())
+            .map_err(|e| format!("écriture de {} : {e}", temporaire.display()))?;
+    }
     fs::copy(&c.installateur, &c.cache).map_err(|e| {
         format!(
             "copie de secours {} -> {} : {e}",
@@ -449,6 +501,23 @@ mod tests {
         assert_eq!(fs::read(&c.cache).unwrap(), b"ancien");
         let err = appliquer(&c, &source, &hote).unwrap_err();
         assert!(err.contains("déjà installée"), "{err}");
+    }
+
+    // Relecture du 23/11 : un fichier « nouveau » posé d'avance (par un autre utilisateur)
+    // n'est jamais réutilisé tel quel ; il est remplacé par un fichier neuf.
+    #[test]
+    fn ne_reutilise_pas_un_fichier_temporaire_pose_d_avance() {
+        let (c, cle) = preparer(3);
+        let temporaire = c.installateur.with_extension("nouveau.exe");
+        fs::write(&temporaire, b"piege-pose-par-un-utilisateur-plus-long").unwrap();
+        let source = source_signee(&c, &cle, 3, b"nouveau", false);
+        let hote = FauxHote {
+            actif: Cell::new(true),
+            ..FauxHote::default()
+        };
+        appliquer(&c, &source, &hote).unwrap();
+        assert_eq!(fs::read(&c.installateur).unwrap(), b"nouveau");
+        assert!(!temporaire.exists());
     }
 
     #[test]

@@ -37,6 +37,20 @@ Section "Client TorDNS" SEC_CLIENT
     File /nonfatal "..\dist\wintun.dll"
 
     CreateDirectory "$COMMONPROGRAMDATA\TorDNS"
+    CreateDirectory "$COMMONPROGRAMDATA\TorDNS\maj"
+    ; Relecture du 23/11 : ProgramData laisse tout utilisateur CRÉER des fichiers dans ses
+    ; sous-dossiers. La tâche de mise à jour tourne en SYSTEM et fait confiance à maj\ (état,
+    ; clé de rotation, installateurs) : un utilisateur sans droits pouvait y poser sa propre clé
+    ; ou échanger l'installateur vérifié. Propriétaire = Administrateurs, héritage coupé,
+    ; écriture réservée à SYSTEM et aux Administrateurs, lecture seule pour les Utilisateurs.
+    nsExec::ExecToLog 'icacls "$COMMONPROGRAMDATA\TorDNS" /setowner *S-1-5-32-544 /T /C /Q'
+    nsExec::ExecToLog 'icacls "$COMMONPROGRAMDATA\TorDNS" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q'
+    nsExec::ExecToLog 'icacls "$COMMONPROGRAMDATA\TorDNS\*" /reset /T /C /Q'
+    ; L'installateur courant sert de retour arrière à la première mise à jour (sans lui,
+    ; maj.rs refusait toute mise à jour : « aucun installateur précédent »).
+    StrCmp "$EXEPATH" "$COMMONPROGRAMDATA\TorDNS\maj\TorDNS-setup.exe" installateur_en_place 0
+        CopyFiles /SILENT "$EXEPATH" "$COMMONPROGRAMDATA\TorDNS\maj\TorDNS-setup.exe"
+    installateur_en_place:
     IfFileExists "$COMMONPROGRAMDATA\TorDNS\client.conf" config_presente 0
         FileOpen $0 "$COMMONPROGRAMDATA\TorDNS\client.conf" w
         FileWrite $0 "# Configuration TorDNS$\r$\n"
