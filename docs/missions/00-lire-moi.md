@@ -61,5 +61,13 @@ brouillon, puis Gary publie.
 | 17 | Site de présentation sur GitHub Pages | 16 |
 | 18 | README à jour (toutes plateformes, téléchargements, nœud, sécurité) | 16, 17 |
 | 19 | Restes de la relecture Claude du 23/11 (sonde du registre, boucle de mise à jour Linux) | — |
+| 20 | Fuzzing de l'analyse DNS (passerelle, clients, registre, manifeste) | 14 |
+| 21 | Compilations reproductibles | 16 |
+| 22 | Page publique de l'état du réseau (agrégats de sondes, rien sur les utilisateurs) | — |
+| 23 | Paquet OpenWrt pour routeur (mips, arm, arm64), anti-fuite LAN | 14 |
+| 24 | Image Raspberry Pi prête à flasher pour les nœuds bénévoles | 16 |
+| 25 | Publication sur F-Droid | 21 |
+| 26 | Client iOS (Network Extension + Arti) | 14 |
+| 27 | Dossier pour un audit de sécurité externe (modèle de menace, périmètre, brouillon OTF) | toutes |
 
-Ordre conseillé : 19 → 14 → 15 → 16 → 17 → 18.
+Ordre : 19 → 14 → 15 → 16 → 17 → 18 → 20 → 21 → 22 → 23 → 24 → 25 → 26 → 27.
