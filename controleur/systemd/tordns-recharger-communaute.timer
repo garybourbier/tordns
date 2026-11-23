@@ -1,0 +1,11 @@
+[Unit]
+Description=TorDNS — recharge le pool communauté toutes les deux minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=tordns-recharger-communaute.service
+
+[Install]
+WantedBy=timers.target

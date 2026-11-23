@@ -112,6 +112,24 @@ sont coupés sur les cinq services (`driver: none`).
 - `tordns-maj.timer` — vérification toutes les 6 h, à décalage aléatoire.
 - `VERSION` — version affichée par la page d'état.
 
+## Rejoindre le pool communauté (Mission 10)
+
+Un bénévole passe explicitement l'adresse du registre et l'adresse maîtresse
+**communauté**. Son nœud écrit un défi servi sur `/.well-known/tordns/defi`,
+s'inscrit par Tor, puis est sondé pendant la quarantaine avant toute admission.
+Il n'entre jamais dans le pool cœur automatiquement.
+
+```bash
+sudo ./noeud/installer.sh --maitresse <adresse-communauté> \
+    --rejoindre <adresse-du-registre>.onion
+```
+
+L'installeur installe `tordns-inscrire`, démarre brièvement le client Tor de
+mise à jour pour joindre le registre, puis l'arrête. L'admission n'est pas
+immédiate : la page publique du registre affiche les nœuds admis. Un nœud
+peut journaliser ses requêtes ; l'adresse communauté est séparée du cœur pour
+cette raison.
+
 ## Mises à jour signées (Mission 11)
 
 Le nœud sert le miroir `/maj/` (dernier manifeste, signature et fichiers) et

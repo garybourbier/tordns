@@ -22,6 +22,7 @@ SANS_SYSTEMD=0
 SANS_ATTENTE=0
 SANS_MAJ=0
 CLE_MAJ=
+REJOINDRE=
 
 usage() {
 	cat <<EOF
@@ -42,6 +43,9 @@ Usage : sudo ./$PROG [options]
   --sans-maj             ne pas construire tordns-maj (hors ligne, tests)
   --cle-maj <hex>        clé publique Ed25519 de publication compilée dans
                          tordns-maj (32 octets en hexadécimal)
+  --rejoindre <adresse>  demande l'admission dans le pool communauté via le
+                         registre à cette adresse .onion (exige --maitresse
+                         avec l'adresse communauté)
   -h, --help             cette aide
 
 Relancer le script est sans danger : le code est mis à jour, les clés et
@@ -87,6 +91,11 @@ while [ $# -gt 0 ]; do
 	--cle-maj)
 		[ $# -ge 2 ] || die "--cle-maj exige une clé hexadécimale"
 		CLE_MAJ=$2
+		shift 2
+		;;
+	--rejoindre)
+		[ $# -ge 2 ] || die "--rejoindre exige une adresse de registre"
+		REJOINDRE=$2
 		shift 2
 		;;
 	-h | --help) usage; exit 0 ;;
@@ -533,6 +542,51 @@ if [ -s "$HOSTNAME_FILE" ]; then
 	printf 'Adresse .onion d’instance : %s\n' "$ADRESSE"
 else
 	printf 'Adresse pas encore publiée.\n'
+fi
+
+# ---------------------------------------------------------------------------
+# 9. Inscription au registre communautaire (Mission 10)
+# ---------------------------------------------------------------------------
+if [ -n "$REJOINDRE" ]; then
+	info "Inscription au registre communautaire"
+	[ -n "$MAITRESSE" ] || die "--rejoindre exige --maitresse <adresse communauté> (ob_config du nœud)"
+	[ -s "$HOSTNAME_FILE" ] || die "adresse d'instance inconnue : inscription impossible"
+
+	JOURNAL_INSC="$DONNEES/inscription-construction.log"
+	if ! docker run --rm -e CGO_ENABLED=0 -v "$CODE":/src -w /src/outils/inscription \
+		golang:1.23-alpine go build -trimpath -ldflags "-s -w" \
+		-o /src/tordns-inscrire . >"$JOURNAL_INSC" 2>&1; then
+		tail -n 5 "$JOURNAL_INSC" >&2 || true
+		die "construction de tordns-inscrire impossible"
+	fi
+	install -m 0755 "$CODE/tordns-inscrire" "$BINAIRES/tordns-inscrire"
+	rm -f "$CODE/tordns-inscrire" "$JOURNAL_INSC"
+	ok "tordns-inscrire installé dans $BINAIRES"
+
+	# Un client Tor séparé fournit le SOCKS loopback utilisé seulement le temps
+	# de l'inscription ; il est arrêté ensuite.
+	# shellcheck disable=SC2086
+	(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" --profile maj up -d maj-tor)
+	DEFI="$DONNEES/tor/defi"
+	REGISTRE_URL=$REJOINDRE
+	case "$REGISTRE_URL" in
+	http://* | https://*) ;;
+	*) REGISTRE_URL="http://$REGISTRE_URL" ;;
+	esac
+	i=0
+	until "$BINAIRES/tordns-inscrire" -registre "$REGISTRE_URL" \
+		-adresse "$(cat "$HOSTNAME_FILE")" -defi "$DEFI" \
+		-socks "127.0.0.1:$SOCKS_MAJ"; do
+		i=$((i + 1))
+		[ "$i" -lt 8 ] || die "inscription au registre impossible (voir ci-dessus)"
+		printf 'Nouvel essai dans 5 s (%s/8)…\n' "$i"
+		sleep 5
+	done
+	chmod 0644 "$DEFI" 2>/dev/null || true
+	chown "$TOR_UID:$TOR_GID" "$DEFI" 2>/dev/null || true
+	# shellcheck disable=SC2086
+	(cd "$CODE/noeud" && $COMPOSE --env-file "$ENV_FILE" --profile maj stop maj-tor) >/dev/null 2>&1 || true
+	ok "inscription envoyée ; admission seulement après la quarantaine de sondes"
 fi
 cat <<EOF
 

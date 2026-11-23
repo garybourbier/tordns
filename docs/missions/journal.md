@@ -122,3 +122,28 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, un registre d'images (GHCR) avec des empreintes
   réelles et un VPS Debian pour l'installation complète ; sinon la relecture
   Claude du format et des refus suffit.
+
+## Mission 10 — Registre et admission des bénévoles (23/11/2026)
+
+- **Fait** : registre Go dans `controleur/registre` (inscription en deux temps,
+  défi aléatoire vérifié sur `/.well-known/tordns/defi`, limites par circuit Tor
+  via PROXY v2 et par jour, état persistant, page publique sans contact), sondes
+  à domaines tirés au hasard comparant adresses A, RCODE et bit AD à Unbound,
+  admission après quarantaine (72 h par défaut) et éviction immédiate sur
+  mensonge DNSSEC/fausse IP ou indisponibilité prolongée. Pool communauté écrit
+  par le registre, second Onionbalance avec clé distincte, rechargement par
+  timer de deux minutes. Côté nœud : route de défi dans Caddy/etat, outil
+  `tordns-inscrire`, option `installer.sh --rejoindre`. Preuve
+  `scripts/verifier-m10.sh` : tests Go (honnête admis, menteur évincé, fausse
+  IP évincée, défi absent refusé, limites, PROXY), inscription réelle
+  registre+nœud factice avec admission et pool, page publique, configuration du
+  second Onionbalance, compose valide.
+- **Reste** : le transport Tor réel, l'émission effective du PROXY v2 par Tor,
+  la publication du service caché du registre et du second descripteur, des
+  nœuds bénévoles réels, la résolution DNSSEC réelle (AD/SERVFAIL simulés) et
+  l'exécution de `installer.sh --rejoindre` sur un Debian vierge n'ont pas été
+  prouvés. Les limites par circuit utilisent le PROXY v2 ; sans Tor, la source
+  réseau sert de repli.
+- **Demandé à qui** : à Gary, une instance du contrôleur avec Tor et un VPS
+  bénévole pour vérifier la publication du second descripteur et le PROXY v2 ;
+  sinon relecture Claude du registre et du format d'inscription.

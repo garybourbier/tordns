@@ -1,0 +1,12 @@
+[Unit]
+Description=TorDNS — applique le pool communauté au second Onionbalance
+Documentation=file:/opt/tordns/controleur/README.md
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tordns/controleur/scripts/recharger-communaute.sh
+# Le registre peut écrire le pool juste après le démarrage : deux tentatives.
+Restart=on-failure
+RestartSec=30s

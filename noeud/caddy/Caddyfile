@@ -47,6 +47,12 @@ http://:8080 {
 		reverse_proxy etat:8081
 	}
 
+	# Défi d'inscription au registre communautaire (Mission 10) : un contenu
+	# aléatoire écrit par l'installeur, sans effet tant qu'il est vide.
+	handle /.well-known/tordns/defi {
+		reverse_proxy etat:8081
+	}
+
 	# Miroir des mises à jour signées : le dernier manifeste et les fichiers
 	# publiés, déposés par Gary dans /var/lib/tordns/maj. Aucun listage de
 	# dossier ; les clients vérifient de toute façon signature et empreinte.

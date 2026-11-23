@@ -41,6 +41,17 @@ ENV_FILE="$DONNEES/.env"
 
 "$BASE/scripts/generer-config.sh" --pool "$POOL" --donnees "$DONNEES"
 
+# Pool communauté (Mission 10) : activé seulement quand la clé et un premier
+# pool existent. Le registre et son service caché démarrent dans tous les cas.
+PROFIL=
+if [ -s "$DONNEES/communaute.key" ] && [ -s "$DONNEES/pools/communaute.txt" ] &&
+	grep -Eq '^[a-z2-7]{56}\.onion$' "$DONNEES/pools/communaute.txt"; then
+	"$BASE/scripts/generer-config.sh" --pool "$DONNEES/pools/communaute.txt" \
+		--donnees "$DONNEES" --cle /donnees/communaute.key \
+		--sortie "$DONNEES/config-communaute.yaml"
+	PROFIL="--profile communaute"
+fi
+
 DOCKER_BIN=$(command -v docker)
 if "$DOCKER_BIN" compose version >/dev/null 2>&1; then
 	COMPOSE="$DOCKER_BIN compose"
@@ -50,7 +61,8 @@ else
 	die "ni 'docker compose' ni 'docker-compose' ne fonctionne"
 fi
 # shellcheck disable=SC2086
-(cd "$BASE" && $COMPOSE --env-file "$ENV_FILE" -f docker-compose.yml up -d --build --remove-orphans)
+# shellcheck disable=SC2086
+(cd "$BASE" && $COMPOSE --env-file "$ENV_FILE" -f docker-compose.yml $PROFIL up -d --build --remove-orphans)
 
 ok "contrôleur démarré"
 printf 'Adresse maîtresse : %s\n' "$(cat "$DONNEES/maitresse.onion")"

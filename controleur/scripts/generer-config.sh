@@ -12,6 +12,9 @@ set -eu
 BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
 POOL="$BASE/pools/coeur.txt"
+# Chemin de la clé dans le conteneur Onionbalance (jamais sur l'hôte en clair
+# dans la configuration).
+CLE=/donnees/maitresse.key
 # Renseigné après l'analyse des options : --donnees peut changer le défaut.
 SORTIE=
 
@@ -35,6 +38,11 @@ while [ $# -gt 0 ]; do
 		SORTIE=$2
 		shift 2
 		;;
+	--cle)
+		[ $# -ge 2 ] || die "--cle exige un chemin de clé (dans le conteneur)"
+		CLE=$2
+		shift 2
+		;;
 	-h | --help)
 		printf 'Usage : %s [--pool fichier] [--donnees dossier] [--sortie fichier]\n' "$0"
 		exit 0
@@ -45,7 +53,11 @@ done
 
 [ -n "$SORTIE" ] || SORTIE="$DONNEES/config.yaml"
 [ -r "$POOL" ] || die "pool illisible : $POOL (copier coeur.txt.example)"
-[ -s "$DONNEES/maitresse.key" ] || die "clé maîtresse absente : lancer creer-maitresse.sh"
+CLE_HOTE=$CLE
+case "$CLE_HOTE" in
+/donnees/*) CLE_HOTE="$DONNEES/${CLE_HOTE#/donnees/}" ;;
+esac
+[ -s "$CLE_HOTE" ] || die "clé absente : $CLE_HOTE (lancer creer-maitresse.sh --nom …)"
 
 TMP="$SORTIE.tmp.$$"
 trap 'rm -f "$TMP"' EXIT
@@ -53,7 +65,7 @@ trap 'rm -f "$TMP"' EXIT
 	printf '# TorDNS — configuration Onionbalance générée depuis %s.\n' "$POOL"
 	printf '# Ne pas modifier à la main : éditer le pool puis relancer demarrer.sh.\n'
 	printf 'services:\n'
-	printf '  - key: /donnees/maitresse.key\n'
+	printf '  - key: %s\n' "$CLE"
 	printf '    instances:\n'
 } >"$TMP"
 

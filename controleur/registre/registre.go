@@ -1,0 +1,454 @@
+// TorDNS — registre et admission des nœuds bénévoles (Mission 10).
+//
+// Un nœud s'inscrit, sert un défi aléatoire sur son service caché, puis est
+// sondé (justesse DNSSEC, disponibilité) pendant une quarantaine avant
+// d'entrer dans le pool communauté. Le pool cœur n'est jamais touché ici.
+//
+// Aucun nom de domaine testé n'est écrit dans un journal : les erreurs ne
+// portent que sur le nœud et le type d'échec.
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	mathrand "math/rand"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+var (
+	errDefiAbsent   = errors.New("défi non servi par le nœud")
+	errMensonge     = errors.New("réponse DNSSEC ou justesse incorrecte")
+	errIndisponible = errors.New("nœud indisponible")
+	reAdresse       = regexp.MustCompile(`^([a-z2-7]{56}\.onion|[a-zA-Z0-9.-]+:[0-9]{1,5})$`)
+)
+
+type config struct {
+	Quarantaine         time.Duration
+	EchecsMax           int
+	IndispoMax          int
+	SondesMin           int
+	MaxInscriptionsJour int
+	MaxParIP            int
+	Reference           string
+	Domaines            []string
+	DomainesParPasse    int
+	Client              *http.Client
+	Maintenant          func() time.Time
+	Hook                func()
+}
+
+type candidat struct {
+	Adresse   string    `json:"adresse"`
+	Defi      string    `json:"defi"`
+	Contact   string    `json:"contact,omitempty"`
+	Depuis    time.Time `json:"depuis"`
+	Confirme  bool      `json:"confirme"`
+	SondesOK  int       `json:"sondes_ok"`
+	SondesKO  int       `json:"sondes_ko"`
+	DernierKO time.Time `json:"dernier_ko,omitempty"`
+}
+
+type admis struct {
+	Adresse    string    `json:"adresse"`
+	Depuis     time.Time `json:"depuis"`
+	SondesOK   int       `json:"sondes_ok"`
+	SondesKO   int       `json:"sondes_ko"`
+	Disponible float64   `json:"disponibilite"`
+	DernierOK  time.Time `json:"dernier_ok"`
+}
+
+type etat struct {
+	Candidats    map[string]*candidat `json:"candidats"`
+	Admis        map[string]*admis    `json:"admis"`
+	Evinces      map[string]time.Time `json:"evinces"`
+	Inscriptions map[string]int       `json:"inscriptions_ip"`
+	Jour         string               `json:"jour"`
+	TotalJour    int                  `json:"total_jour"`
+}
+
+type registre struct {
+	mu     sync.Mutex
+	cfg        config
+	etat       etat
+	chemin     string
+	cheminPool string
+}
+
+func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
+	if cfg.Maintenant == nil {
+		cfg.Maintenant = time.Now
+	}
+	if cfg.Client == nil {
+		cfg.Client = &http.Client{Timeout: 15 * time.Second}
+	}
+	if cfg.Quarantaine <= 0 {
+		cfg.Quarantaine = 72 * time.Hour
+	}
+	if cfg.EchecsMax <= 0 {
+		cfg.EchecsMax = 1
+	}
+	if cfg.IndispoMax <= 0 {
+		cfg.IndispoMax = 6
+	}
+	if cfg.SondesMin <= 0 {
+		cfg.SondesMin = 2
+	}
+	if cfg.MaxInscriptionsJour <= 0 {
+		cfg.MaxInscriptionsJour = 50
+	}
+	if cfg.MaxParIP <= 0 {
+		cfg.MaxParIP = 3
+	}
+	if cfg.DomainesParPasse <= 0 {
+		cfg.DomainesParPasse = 3
+	}
+	if len(cfg.Domaines) == 0 {
+		cfg.Domaines = []string{
+			"ietf.org", "nlnetlabs.nl", "internetsociety.org", "dnssec-failed.org",
+		}
+	}
+	r := &registre{cfg: cfg, chemin: chemin, cheminPool: cheminPool, etat: etat{
+		Candidats:    map[string]*candidat{},
+		Admis:        map[string]*admis{},
+		Evinces:      map[string]time.Time{},
+		Inscriptions: map[string]int{},
+	}}
+	if chemin != "" {
+		brut, err := os.ReadFile(chemin)
+		if err == nil {
+			if err := json.Unmarshal(brut, &r.etat); err != nil {
+				return nil, fmt.Errorf("état du registre illisible : %w", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	// Un state ancien peut ne pas avoir toutes les cartes.
+	if r.etat.Candidats == nil {
+		r.etat.Candidats = map[string]*candidat{}
+	}
+	if r.etat.Admis == nil {
+		r.etat.Admis = map[string]*admis{}
+	}
+	if r.etat.Evinces == nil {
+		r.etat.Evinces = map[string]time.Time{}
+	}
+	if r.etat.Inscriptions == nil {
+		r.etat.Inscriptions = map[string]int{}
+	}
+	return r, nil
+}
+
+func (r *registre) enregistrer() error {
+	if r.chemin == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(r.chemin), 0o700); err != nil {
+		return err
+	}
+	brut, err := json.MarshalIndent(r.etat, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := r.chemin + ".tmp"
+	if err := os.WriteFile(tmp, append(brut, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.chemin)
+}
+
+// changerJour remet à zéro les compteurs journaliers.
+func (r *registre) changerJour(maintenant time.Time) {
+	jour := maintenant.UTC().Format("2006-01-02")
+	if r.etat.Jour != jour {
+		r.etat.Jour = jour
+		r.etat.TotalJour = 0
+		r.etat.Inscriptions = map[string]int{}
+	}
+}
+
+func defiAleatoire() (string, error) {
+	brut := make([]byte, 32)
+	if _, err := rand.Read(brut); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(brut), nil
+}
+
+// verifierDefi lit le défi servi par le nœud, avec un plafond de taille.
+func (r *registre) verifierDefi(adresse, defi string) error {
+	url := "http://" + adresse + "/.well-known/tordns/defi"
+	reponse, err := r.cfg.Client.Get(url)
+	if err != nil {
+		return fmt.Errorf("%w : %v", errDefiAbsent, err)
+	}
+	defer reponse.Body.Close()
+	if reponse.StatusCode != http.StatusOK {
+		return errDefiAbsent
+	}
+	corps, err := io.ReadAll(io.LimitReader(reponse.Body, 256))
+	if err != nil {
+		return errDefiAbsent
+	}
+	if strings.TrimSpace(string(corps)) != defi {
+		return errDefiAbsent
+	}
+	return nil
+}
+
+// inscrire crée un candidat et lui remet un défi ; la preuve du défi se fait
+// dans confirmer. ip sert uniquement aux limites d'inscription ; elle n'est
+// jamais conservée.
+func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	adresse = strings.TrimSpace(adresse)
+	if !reAdresse.MatchString(adresse) {
+		return candidat{}, errors.New("adresse d'instance invalide")
+	}
+	maintenant := r.cfg.Maintenant()
+	r.changerJour(maintenant)
+	if _, ok := r.etat.Evinces[adresse]; ok {
+		return candidat{}, errors.New("adresse évincée : inscription refusée")
+	}
+	if _, ok := r.etat.Admis[adresse]; ok {
+		return candidat{}, errors.New("adresse déjà admise")
+	}
+	if r.etat.TotalJour >= r.cfg.MaxInscriptionsJour {
+		return candidat{}, errors.New("quota journalier du registre atteint")
+	}
+	if r.etat.Inscriptions[ip] >= r.cfg.MaxParIP {
+		return candidat{}, errors.New("trop d'inscriptions depuis cette source aujourd'hui")
+	}
+	// Une nouvelle demande remplace le défi précédent : le nœud doit prouver
+	// à nouveau qu'il contrôle l'adresse.
+	delete(r.etat.Candidats, adresse)
+	defi, err := defiAleatoire()
+	if err != nil {
+		return candidat{}, err
+	}
+	c := &candidat{
+		Adresse: adresse,
+		Defi:    defi,
+		Contact: strings.TrimSpace(contact),
+		Depuis:  maintenant,
+	}
+	r.etat.Candidats[adresse] = c
+	r.etat.TotalJour++
+	r.etat.Inscriptions[ip]++
+	if err := r.enregistrer(); err != nil {
+		return candidat{}, err
+	}
+	return *c, nil
+}
+
+// confirmer vérifie que le nœud sert maintenant le défi qui lui a été remis.
+func (r *registre) confirmer(adresse string) (candidat, error) {
+	r.mu.Lock()
+	c, ok := r.etat.Candidats[strings.TrimSpace(adresse)]
+	if !ok {
+		r.mu.Unlock()
+		return candidat{}, errors.New("inscription inconnue")
+	}
+	defi := c.Defi
+	r.mu.Unlock()
+	if err := r.verifierDefi(adresse, defi); err != nil {
+		return candidat{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok = r.etat.Candidats[adresse]
+	if !ok {
+		return candidat{}, errors.New("inscription inconnue")
+	}
+	c.Confirme = true
+	c.Depuis = r.cfg.Maintenant()
+	if err := r.enregistrer(); err != nil {
+		return candidat{}, err
+	}
+	return *c, nil
+}
+
+// sonder interroge un nœud sur tous les domaines et compare à la référence.
+func (r *registre) sonder(adresse string, domaines []string) error {
+	url, err := urlNoeud(adresse)
+	if err != nil {
+		return errIndisponible
+	}
+	for _, domaine := range domaines {
+		attendu, err := interrogerReference(r.cfg.Reference, domaine)
+		if err != nil {
+			return fmt.Errorf("référence DNSSEC indisponible")
+		}
+		obtenu, _, err := interrogerDoH(r.cfg.Client, url, domaine)
+		if err != nil {
+			return errIndisponible
+		}
+		if obtenu.Rcode != attendu.Rcode || obtenu.AD != attendu.AD ||
+			!slices.Equal(obtenu.IPs, attendu.IPs) {
+			return errMensonge
+		}
+	}
+	return nil
+}
+
+// passe sonde tous les nœuds une fois. Renvoie vrai si l'ensemble des admis a
+// changé (une régénération du pool communauté est alors nécessaire).
+func (r *registre) passe() (bool, error) {
+	r.mu.Lock()
+	maintenant := r.cfg.Maintenant()
+	r.changerJour(maintenant)
+	adresses := make([]string, 0, len(r.etat.Candidats)+len(r.etat.Admis))
+	for a := range r.etat.Candidats {
+		adresses = append(adresses, a)
+	}
+	for a := range r.etat.Admis {
+		adresses = append(adresses, a)
+	}
+	r.mu.Unlock()
+	sort.Strings(adresses)
+	// Un sous-ensemble aléatoire de la liste publique à chaque passe : un nœud
+	// ne peut pas savoir quels domaines seront testés.
+	domaines := append([]string(nil), r.cfg.Domaines...)
+mathrand.Shuffle(len(domaines), func(i, j int) { domaines[i], domaines[j] = domaines[j], domaines[i] })
+	if len(domaines) > r.cfg.DomainesParPasse {
+		domaines = domaines[:r.cfg.DomainesParPasse]
+	}
+
+	change := false
+	for _, adresse := range adresses {
+		r.mu.Lock()
+		c, candidat := r.etat.Candidats[adresse]
+		confirme := candidat && c.Confirme
+		r.mu.Unlock()
+		if candidat && !confirme {
+			continue
+		}
+		err := r.sonder(adresse, domaines)
+		r.mu.Lock()
+		if c, ok := r.etat.Candidats[adresse]; ok {
+			if err != nil {
+				if errors.Is(err, errMensonge) {
+					// Un mensonge DNSSEC pendant la quarantaine disqualifie.
+					delete(r.etat.Candidats, adresse)
+				} else {
+					c.SondesKO++
+					c.DernierKO = maintenant
+					// « Toutes réussies » : un échec réseau remet le délai à zéro.
+					c.Depuis = maintenant
+					c.SondesOK = 0
+				}
+			} else {
+				c.SondesOK++
+				if maintenant.Sub(c.Depuis) >= r.cfg.Quarantaine && c.SondesOK >= r.cfg.SondesMin {
+					delete(r.etat.Candidats, adresse)
+					r.etat.Admis[adresse] = &admis{
+						Adresse:    adresse,
+						Depuis:     maintenant,
+						SondesOK:   c.SondesOK,
+						Disponible: 1,
+						DernierOK:  maintenant,
+					}
+					change = true
+				}
+			}
+		} else if a, ok := r.etat.Admis[adresse]; ok {
+			total := a.SondesOK + a.SondesKO
+			if err != nil {
+				a.SondesKO++
+				if errors.Is(err, errMensonge) && a.SondesKO >= r.cfg.EchecsMax ||
+					errors.Is(err, errIndisponible) && a.SondesKO >= r.cfg.IndispoMax {
+					delete(r.etat.Admis, adresse)
+					r.etat.Evinces[adresse] = maintenant
+					change = true
+				}
+			} else {
+				a.SondesOK++
+				a.DernierOK = maintenant
+			}
+			if t := a.SondesOK + a.SondesKO; t > 0 {
+				a.Disponible = float64(a.SondesOK) / float64(t)
+			} else {
+				a.Disponible = float64(a.SondesOK) / float64(total)
+			}
+		}
+		r.mu.Unlock()
+	}
+	r.mu.Lock()
+	err := r.enregistrer()
+	r.mu.Unlock()
+	if err == nil && change {
+		if err = r.ecrirePool(); err != nil {
+			return true, err
+		}
+	}
+	if err == nil && change && r.cfg.Hook != nil {
+		r.cfg.Hook()
+	}
+	return change, err
+}
+
+// ecrirePool publie le pool communauté à partir des seuls nœuds admis. Le
+// pool cœur n'est jamais écrit ici.
+func (r *registre) ecrirePool() error {
+	if r.cheminPool == "" {
+		return nil
+	}
+	r.mu.Lock()
+	adresses := make([]string, 0, len(r.etat.Admis))
+	for a := range r.etat.Admis {
+		adresses = append(adresses, a)
+	}
+	r.mu.Unlock()
+	sort.Strings(adresses)
+	var b strings.Builder
+	b.WriteString("# TorDNS — pool communauté, écrit par le registre. Ne pas modifier.\n")
+	for _, a := range adresses {
+		b.WriteString(a)
+		b.WriteByte('\n')
+	}
+	if err := os.MkdirAll(filepath.Dir(r.cheminPool), 0o700); err != nil {
+		return err
+	}
+	tmp := r.cheminPool + ".tmp"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.cheminPool)
+}
+
+func (r *registre) instantane() etat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copie := etat{
+		Candidats: map[string]*candidat{},
+		Admis:     map[string]*admis{},
+		Evinces:   map[string]time.Time{},
+		Jour:      r.etat.Jour,
+		TotalJour: r.etat.TotalJour,
+	}
+	for k, v := range r.etat.Candidats {
+		c := *v
+		copie.Candidats[k] = &c
+	}
+	for k, v := range r.etat.Admis {
+		a := *v
+		copie.Admis[k] = &a
+	}
+	for k, v := range r.etat.Evinces {
+		copie.Evinces[k] = v
+	}
+	return copie
+}

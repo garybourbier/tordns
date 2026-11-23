@@ -85,7 +85,105 @@ services:
     networks:
       - controleur
 
+  # Second Onionbalance : adresse communauté, alimentée uniquement par le
+  # pool écrit par le registre. Clé et configuration distinctes de celles du
+  # pool cœur ; un bénévole n'entre jamais dans le pool cœur.
+  onionbalance-communaute:
+    build:
+      context: ./onionbalance
+    image: tordns/onionbalance:local
+    container_name: tordns-controleur-onionbalance-communaute
+    <<: *durcissement
+    mem_limit: 160m
+    cpus: 0.30
+    profiles: ["communaute"]
+    user: "${TORDNS_CONTROLEUR_UID:-100}:${TORDNS_CONTROLEUR_GID:-101}"
+    command:
+      - -v
+      - info
+      - -c
+      - /donnees/config-communaute.yaml
+      - -s
+      - /var/lib/tor/control_socket
+    environment:
+      HOME: /tmp
+      ONIONBALANCE_LOG_LEVEL: info
+    volumes:
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}:/donnees:ro
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/tor:/var/lib/tor:ro
+    depends_on:
+      tor:
+        condition: service_healthy
+    networks:
+      - controleur
+
+  # Résolveur de référence du registre : même configuration DNSSEC que les
+  # nœuds, aucun port publié. Le registre compare le bit AD et le RCODE des
+  # nœuds à cette résolution.
+  unbound:
+    build:
+      context: ../serveur/unbound
+    image: tordns/unbound:local
+    container_name: tordns-controleur-unbound
+    <<: *durcissement
+    mem_limit: 192m
+    cpus: 0.50
+    networks:
+      - controleur
+    healthcheck:
+      test: ["CMD", "dig", "+short", "+tcp", "@127.0.0.1", "-p", "5335", ".", "NS"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # API du registre communautaire : inscription, confirmation du défi, page
+  # publique. Exposée seulement par le service caché Tor `registre`.
+  registre:
+    build:
+      context: ./registre
+    image: tordns/registre:local
+    container_name: tordns-controleur-registre
+    <<: *durcissement
+    mem_limit: 128m
+    cpus: 0.30
+    user: "${TORDNS_CONTROLEUR_UID:-100}:${TORDNS_CONTROLEUR_GID:-101}"
+    command:
+      - -etat
+      - /donnees/registre.json
+      - -pool
+      - /pools/communaute.txt
+      - -domaines
+      - /domaines.txt
+      - -reference
+      - unbound:5335
+      - -socks
+      - tor:9050
+      - -ecoute
+      - :8080
+    volumes:
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/registre:/donnees
+      - ${TORDNS_CONTROLEUR_DONNEES:?chemin des données du contrôleur manquant}/pools:/pools
+      - ./domaines.txt:/domaines.txt:ro
+    depends_on:
+      tor:
+        condition: service_healthy
+      unbound:
+        condition: service_healthy
+    networks:
+      - controleur
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/etat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 networks:
-  # Réseau privé : Tor et onionbalance seulement, aucun port publié.
+  # Réseau privé : Tor, onionbalance, registre et Unbound ; aucun port publié.
+  # Le sous-réseau fixe est autorisé par serveur/unbound/unbound.conf.
   controleur:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.58.0/24

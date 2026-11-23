@@ -1,0 +1,17 @@
+# TorDNS — domaines publics utilisés par les sondes (Mission 10).
+# Liste publique, volontairement stable et signée DNSSEC. Le registre compare
+# le bit AD et le code de retour à la résolution du contrôleur ; il ne compare
+# jamais les adresses IP (CDN géographiques).
+#
+# Les adresses A sont comparées à la référence : n'ajouter que des zones
+# stables, sans répartition CDN géographique (une IP différente serait
+# comptée à tort comme un mensonge).
+#
+# Aucun nom testé n'est journalisé.
+ietf.org
+nlnetlabs.nl
+internetsociety.org
+dnssec-deployment.org
+torproject.org
+debian.org
+dnssec-failed.org

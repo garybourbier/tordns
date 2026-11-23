@@ -2,7 +2,11 @@
 # TorDNS — crée la clé maîtresse d'Onionbalance (Mission 9).
 #
 #   sudo ./controleur/scripts/creer-maitresse.sh
+#   sudo ./controleur/scripts/creer-maitresse.sh --nom communaute   (mission 10)
 #   ./controleur/scripts/creer-maitresse.sh --donnees /chemin/jetable   (tests)
+#
+# Deux identités distinctes : `maitresse` (pool cœur) et `communaute` (pool
+# des bénévoles admis). Elles ne partagent jamais leur clé.
 #
 # Idempotent : si la clé existe, le script affiche seulement l'adresse et ne
 # touche à rien. La clé est la seule chose qui fait l'identité publique du
@@ -12,13 +16,15 @@ set -eu
 
 BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 DONNEES=${TORDNS_CONTROLEUR_DONNEES:-/var/lib/tordns-controleur}
+NOM=maitresse
 
 usage() {
 	cat <<EOF
-Usage : sudo ./controleur/scripts/creer-maitresse.sh [--donnees <dossier>]
+Usage : sudo ./controleur/scripts/creer-maitresse.sh [--donnees <dossier>] [--nom <identité>]
 
   --donnees <dossier>  dossier des secrets du contrôleur
                        (défaut : /var/lib/tordns-controleur, 0700)
+  --nom <identité>     maitresse (défaut, pool cœur) ou communaute
   -h, --help           cette aide
 EOF
 }
@@ -32,6 +38,11 @@ while [ $# -gt 0 ]; do
 	--donnees)
 		[ $# -ge 2 ] || die "--donnees exige un dossier"
 		DONNEES=$2
+		shift 2
+		;;
+	--nom)
+		[ $# -ge 2 ] || die "--nom exige maitresse ou communaute"
+		NOM=$2
 		shift 2
 		;;
 	-h | --help) usage; exit 0 ;;
@@ -55,9 +66,9 @@ else
 	GID_=$(id -g)
 fi
 
-mkdir -p "$DONNEES/tor"
-chmod 0700 "$DONNEES" "$DONNEES/tor"
-chown "$UID_:$GID_" "$DONNEES" "$DONNEES/tor" 2>/dev/null || true
+mkdir -p "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools"
+chmod 0700 "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools"
+chown "$UID_:$GID_" "$DONNEES" "$DONNEES/tor" "$DONNEES/registre" "$DONNEES/pools" 2>/dev/null || true
 
 ENV_FILE="$DONNEES/.env"
 cat >"$ENV_FILE" <<EOF
@@ -68,12 +79,16 @@ TORDNS_CONTROLEUR_GID=$GID_
 EOF
 chmod 0600 "$ENV_FILE"
 
-CLE="$DONNEES/maitresse.key"
-FICHIER_ADRESSE="$DONNEES/maitresse.onion"
+case "$NOM" in
+maitresse | communaute) ;;
+*) die "--nom doit être maitresse ou communaute" ;;
+esac
+CLE="$DONNEES/$NOM.key"
+FICHIER_ADRESSE="$DONNEES/$NOM.onion"
 
 if [ -s "$CLE" ] && [ -s "$FICHIER_ADRESSE" ]; then
-	ok "clé maîtresse déjà présente, inchangée"
-	printf 'Adresse maîtresse : %s\n' "$(cat "$FICHIER_ADRESSE")"
+	ok "clé $NOM déjà présente, inchangée"
+	printf 'Adresse %s : %s\n' "$NOM" "$(cat "$FICHIER_ADRESSE")"
 	exit 0
 fi
 
@@ -123,8 +138,8 @@ chmod 0600 "$CLE" "$FICHIER_ADRESSE"
 chown "$UID_:$GID_" "$CLE" "$FICHIER_ADRESSE" 2>/dev/null || true
 rm -rf "$TMP_GEN"
 
-ok "clé maîtresse créée dans $CLE (0600, hors dépôt)"
-printf 'Adresse maîtresse : %s\n' "$ADRESSE"
+ok "clé $NOM créée dans $CLE (0600, hors dépôt)"
+printf 'Adresse %s : %s\n' "$NOM" "$ADRESSE"
 cat <<EOF
 
 Sauvegarde : la perte de cette clé perd l'identité publique du service.

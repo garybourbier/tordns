@@ -155,6 +155,12 @@ func main() {
 	if cookie == "" {
 		cookie = "/tor/control_auth_cookie"
 	}
+	// Défi d'inscription au registre communautaire (Mission 10). Écrit par
+	// l'installeur ; absent tant que le nœud n'a pas demandé à rejoindre.
+	defi := os.Getenv("TORDNS_DEFI")
+	if defi == "" {
+		defi = "/tor/defi"
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/tordns/etat", func(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +175,25 @@ func main() {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(etatCourant(version, unbound, controleTor, cookie))
+	})
+	mux.HandleFunc("/.well-known/tordns/defi", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "méthode non autorisée", http.StatusMethodNotAllowed)
+			return
+		}
+		brut, err := os.ReadFile(defi)
+		contenu := strings.TrimSpace(string(brut))
+		if err != nil || contenu == "" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method == http.MethodHead {
+			return
+		}
+		_, _ = w.Write([]byte(contenu + "\n"))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
