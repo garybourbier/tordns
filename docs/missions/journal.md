@@ -284,3 +284,25 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, pousser la branche et vérifier le premier run
   GitHub ainsi que le téléchargement des artifacts ; à Claude, relire les
   empreintes d'actions et les scripts de packaging.
+
+## Mission 15 — Client macOS (23/11/2026)
+
+- **Fait** : le cœur du client est désormais dans `client-linux/relais`
+  (relais, cache, DNS, DNSSEC, DoH, adresses signées), partagé par Linux et
+  macOS sans duplication. `client-macos` ajoute un service launchd, le réglage
+  DNS de chaque service actif par `networksetup` avec sauvegarde/restauration
+  (`dns-original.json`, root:wheel 0700), un diagnostic `scutil --dns`, le
+  refus de démarrer sans SOCKS Tor, et une mise à jour signée avec remplacement
+  atomique, `launchctl kickstart -k` et `rejetee`. Binaires amd64/arm64
+  compilés, universel via `lipo` sur macOS, `.pkg` non signé via `pkgbuild` et
+  scripts d'installation/désinstallation. `scripts/verifier-m15.sh` teste le
+  cœur, les analyseurs sur fixtures, les deux Mach-O et vérifie launchd/scutil/
+  networksetup/SOCKS. Le workflow ajoute `macos-latest` et `macos-15-intel`
+  (`macos-13` n'est plus un label GitHub en 2026).
+- **Reste / non prouvé** : lancement réel sur un Mac, `launchd`,
+  `networksetup`/`scutil`, restauration DNS après arrêt, binaire universel
+  (`lipo` absent ici), `.pkg`, signature Developer ID et notarisation Apple.
+  Aucun secret Apple n'est utilisé.
+- **Demandé à qui** : à Gary, un Mac Intel et un Mac Apple Silicon pour le
+  lancement réel et le `.pkg` ; à Claude, relire la sauvegarde/restauration DNS
+  et le chemin de mise à jour launchd.
