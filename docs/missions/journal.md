@@ -306,3 +306,29 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, un Mac Intel et un Mac Apple Silicon pour le
   lancement réel et le `.pkg` ; à Claude, relire la sauvegarde/restauration DNS
   et le chemin de mise à jour launchd.
+
+## Mission 16 — CD, release brouillon et images GHCR (23/11/2026)
+
+- **Fait** : `.github/workflows/release.yml` ne se déclenche que sur un tag
+  `v*.*.*`, vérifie que le tag correspond à `noeud/VERSION`, réutilise les
+  scripts `scripts/ci/`, construit Linux/Windows/macOS/Android, pousse les
+  images multi-arch sur GHCR avec `images-release.sh`, écrit `images.txt` avec
+  les empreintes, assemble les noms `tordns-<produit>-<version>-<os>-<arch>`,
+  `SHA256SUMS`, les attestations de provenance et crée la release **brouillon**
+  avec les notes de `CHANGELOG.md`. `tordns-signer manifeste --depuis-release`
+  vérifie les sommes (et les attestations avec `--attestations`), déduit les
+  cibles et les images ; `outils/signer-apk.sh` signe les APK, vérifie avec
+  `apksigner verify` et recalcule les sommes. Le nœud accepte
+  `--images ghcr` (ou `TORDNS_IMAGES=ghcr`) avec les images épinglées de
+  `images.txt` ; la construction locale reste le défaut. Procédure complète
+  dans `docs/publier-une-version.md`. `scripts/verifier-m16.sh` est vert et
+  M14/M15/M19 ont été rejouées vertes après ces changements.
+- **Reste / non prouvé** : exécution réelle du workflow sur un tag, attestations
+  GitHub, connexion et push GHCR multi-arch, création du brouillon, `gh release
+  download`, vérification `gh attestation verify`, publication finale. Aucun
+  tag n'a été poussé et aucune release n'a été publiée. `actions/attest-build-provenance`
+  couvre tous les fichiers de `dist/release/*` en une invocation ; à confirmer
+  au premier tag que chaque fichier reçoit bien son attestation.
+- **Demandé à qui** : à Gary, pousser le premier tag et contrôler le brouillon
+  et GHCR ; à Claude, relire `release-assembler.sh` et `images-release.sh` au
+  premier passage réel.
