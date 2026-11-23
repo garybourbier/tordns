@@ -6,13 +6,23 @@ pour tenir sur un VPS à 1 Go. Aucun port DNS, DoH ou SOCKS publié sur l'hôte 
 le seul point d'entrée est l'adresse `.onion` du nœud. Aucun journal de
 requête.
 
+Les clients et les informations de téléchargement sont sur la
+[page de présentation](https://garybourbier.github.io/tordns/) et dans la
+[dernière release](https://github.com/garybourbier/tordns/releases/latest).
+
 ## Installation
 
 ```bash
 sudo apt-get update && sudo apt-get install -y git
-git clone <dépôt> tordns && cd tordns
+git clone https://github.com/garybourbier/tordns.git tordns && cd tordns
 sudo ./noeud/installer.sh
 ```
+
+Pour utiliser les images multi-arch publiées sur GHCR au lieu de les
+construire, télécharger `images.txt` dans la release, le placer dans `noeud/`,
+puis lancer `sudo ./noeud/installer.sh --images ghcr`. Chaque image est
+épinglée par son empreinte `@sha256`. Sans cette option, la construction
+locale reste le défaut.
 
 L'installeur :
 

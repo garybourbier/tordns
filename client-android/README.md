@@ -4,6 +4,14 @@ Application Android sans root qui capture le DNS de l'appareil via `VpnService`
 et le résout par DoH vers le `.onion` de TorDNS, avec **Arti** (implémentation
 Tor officielle en Rust) embarqué.
 
+## Télécharger
+
+Prendre l'APK universel ou celui de l'ABI de l'appareil dans la
+[dernière release](https://github.com/garybourbier/tordns/releases/latest)
+(`tordns-client-0.8.0-android-universel.apk`, `-arm64-v8a`, `-armeabi-v7a`,
+`-x86_64`) ou sur la [page de présentation](https://garybourbier.github.io/tordns/).
+Les APK de la release sont à signer par Gary avec la clé Android de publication.
+
 ```
 Applications Android / résolveur système
    │ UDP 53 vers 10.111.222.1 (TUN, sans root)

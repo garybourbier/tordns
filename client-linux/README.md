@@ -9,6 +9,14 @@ Aucun paquet DNS n'est émis en clair : le relais n'ouvre qu'une connexion vers
 `127.0.0.1:9050` (ou le port configuré). Aucun journal de requête, rien sur
 disque.
 
+## Télécharger
+
+Prendre l'archive ou le `.deb` amd64/arm64/armv7 dans la
+[dernière release](https://github.com/garybourbier/tordns/releases/latest)
+(`tordns-client-0.8.0-linux-amd64.tar.gz`, `.deb`, etc.) ou sur la
+[page de présentation](https://garybourbier.github.io/tordns/). La compilation
+ci-dessous reste utile pour développer.
+
 ```
 Application / navigateur / OS
    │ UDP ou TCP 127.0.0.1:53

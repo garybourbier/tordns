@@ -3,6 +3,12 @@
 Relais DNS local vers le service caché TorDNS, équivalent du client Linux :
 cache borné, DNSSEC, liste d'adresses signée, aucun journal de requêtes.
 
+## Télécharger
+
+Prendre `tordns-client-0.8.0-macos-universel.pkg` (ou le binaire universel)
+dans la [dernière release](https://github.com/garybourbier/tordns/releases/latest)
+ou sur la [page de présentation](https://garybourbier.github.io/tordns/).
+
 ## Prérequis
 
 - macOS 12 ou ultérieur, Intel ou Apple Silicon.

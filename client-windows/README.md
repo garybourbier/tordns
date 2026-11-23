@@ -22,6 +22,15 @@ Contrairement au client Android, Tor n'est pas embarqué : le service suppose un
 démon Tor (ou Tor Browser / Tor Expert Bundle) exposant un `SocksPort` local.
 C'est le même modèle que le client Linux de la Mission 4.
 
+## Télécharger
+
+Utiliser l'installateur x86_64 ou aarch64 de la
+[dernière release](https://github.com/garybourbier/tordns/releases/latest)
+(`tordns-client-0.8.0-windows-x86_64-setup.exe` ou
+`tordns-client-0.8.0-windows-aarch64-setup.exe`) ou la
+[page de présentation](https://garybourbier.github.io/tordns/). La
+construction ci-dessous sert au développement.
+
 ## Composants
 
 | Fichier | Rôle |
