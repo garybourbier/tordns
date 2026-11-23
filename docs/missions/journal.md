@@ -420,3 +420,33 @@ Une entrée par mission : fait, reste, demandé à qui.
   confirmer la reproductibilité sur macOS, les images multi-arch et le runner
   Windows ; à Claude, relire `reproduire.sh`, `pe-timestamp.py` et les
   Dockerfiles épinglés.
+
+## Mission 22 — Page publique de l'état du réseau (24/11/2026)
+
+- **Fait** : le registre agrège ses sondes cœur et communauté dans
+  `/donnees/etat-reseau.json` : nœuds admis et joignables, délais médian et p95
+  sur 24 h, taux de réponses DNSSEC correctes et dernière tentative de
+  publication du descripteur. L'historique est borné à 720 agrégats horaires
+  (30 jours), avec plafond d'échantillons et purge. Les sondes mesurent
+  désormais la latence et la justesse sans conserver les noms de domaine. Le
+  pool cœur est relu à chaque passe. Les endpoints `/reseau` (HTML, SVG côté
+  serveur, aucun JavaScript) et `/reseau.json` servent des données agrégées ;
+  les adresses d'instance sont tronquées aux huit premiers caractères, sans
+  contact, défi, domaine demandé ni compteur de trafic. La date de publication
+  est lue sur le socket de statut d'Onionbalance, avec repli sur un fichier.
+  Le pool cœur est recopié dans le volume, et le socket de statut partage un
+  volume `run/` entre Onionbalance et le registre. La copie GitHub Pages est
+  conditionnée par `TORDNS_PUBLIER_ETAT_RESEAU=oui` et lit `/reseau.json` par
+  Tor ; l'adresse `.onion` vient de `TORDNS_REGISTRE_ONION`, avec repli vers
+  l'adresse configurée. Preuve `scripts/verifier-m22.sh` : tests d'agrégation,
+  de fenêtre et de purge, page et JSON sans adresse complète, sans contact ni
+  défi, HTML/SVG sans JavaScript, lint vert. M10, M17, M18 et M19 ont été
+  rejouées vertes après ces changements.
+- **Reste / non prouvé** : la publication réelle du service caché et la lecture
+  par Tor (aucun Tor lancé dans la preuve), le socket d'Onionbalance réel, les
+  variables de dépôt et l'exécution du workflow Pages, les délais sur de vrais
+  nœuds (mesures simulées). La date affichée est la dernière **tentative** de
+  publication rapportée par Onionbalance, pas une confirmation d'upload.
+- **Demandé à qui** : à Gary, définir les deux variables de dépôt et lancer le
+  workflow Pages une fois avec Tor ; à Claude, relire la conservation des
+  échantillons et l'interprétation des dates Onionbalance.
