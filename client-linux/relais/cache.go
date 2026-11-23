@@ -1,4 +1,4 @@
-package main
+package relais
 
 // Cache LRU en mémoire, borné, avec expiration par TTL. Aucune donnée n'est
 // écrite sur disque et aucune requête n'est journalisée.

@@ -10,7 +10,7 @@
 // NSEC3 sont vérifiées : nom absent, wildcard absent, NODATA et délégation
 // sans DS. Une preuve absente ou incohérente est refusée, jamais devinée.
 
-package main
+package relais
 
 import (
 	"errors"

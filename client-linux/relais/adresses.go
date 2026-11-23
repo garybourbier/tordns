@@ -4,7 +4,7 @@
 // choisit le cœur ou la communauté selon le réglage utilisateur. Une liste
 // absente, expirée ou mal signée ne fait jamais échouer le client : l'adresse
 // saisie en configuration reste le secours.
-package main
+package relais
 
 import (
 	"os"
@@ -61,11 +61,6 @@ func adresseEffective(dossier, cle, mode, secours string) string {
 		mode = "coeur"
 	}
 	return choisirAdresse(mode, adressesVerifiees(dossier, cle, time.Now()), secours)
-}
-
-// dossierAdresses est le chemin par défaut, écrit par la mise à jour Linux.
-func dossierAdresses() string {
-	return filepath.Join("/var/lib/tordns", "maj")
 }
 
 // clePublique lit la clé de publication surchargeable (tests, rotation).

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+install -d -m 0700 -o root -g wheel "/Library/Application Support/TorDNS" "/Library/Application Support/TorDNS/maj"
+if [ ! -f "/Library/Application Support/TorDNS/client.env" ]; then
+	install -m 0600 -o root -g wheel /dev/null "/Library/Application Support/TorDNS/client.env"
+	{
+		echo "TORDNS_ONION="
+		echo "TORDNS_SOCKS=127.0.0.1:9050"
+		echo "TORDNS_DNSSEC=auto"
+		echo "TORDNS_MODE_ADRESSE=coeur"
+	} >"/Library/Application Support/TorDNS/client.env"
+	chmod 0600 "/Library/Application Support/TorDNS/client.env"
+fi
+chown root:wheel "/Library/Application Support/TorDNS/client.env"
+chmod 0600 "/Library/Application Support/TorDNS/client.env"
+launchctl bootout system/org.tordns.client 2>/dev/null || true
+launchctl bootstrap system /Library/LaunchDaemons/org.tordns.client.plist
+launchctl enable system/org.tordns.client
+exit 0

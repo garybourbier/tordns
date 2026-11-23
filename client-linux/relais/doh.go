@@ -1,4 +1,4 @@
-package main
+package relais
 
 // Client DoH (RFC 8484) transporté dans un flux SOCKS5 vers le service caché
 // Tor v3. Aucune connexion DNS directe n'est effectuée : tout passe par le

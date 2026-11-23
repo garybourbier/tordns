@@ -1,4 +1,4 @@
-package main
+package relais
 
 // Manipulation minimale du format DNS filaire (RFC 1035) : lecture de la
 // question, calcul de la durée de cache et réécriture de l'identifiant et des

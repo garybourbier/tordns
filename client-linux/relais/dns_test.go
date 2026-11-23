@@ -1,4 +1,4 @@
-package main
+package relais
 
 import (
 	"encoding/binary"

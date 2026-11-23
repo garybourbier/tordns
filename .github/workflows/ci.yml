@@ -92,6 +92,32 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            os: macos-latest
+          - arch: amd64
+            os: macos-15-intel
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: "**/go.sum"
+      - run: ./scripts/ci/client-macos.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/client-macos/
+          retention-days: 7
+          if-no-files-found: error
+
   android:
     name: Android
     runs-on: ubuntu-latest
