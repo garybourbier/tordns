@@ -260,3 +260,27 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, un essai contre quelques domaines CDN réels et
   une VM Windows pour le service ; à Claude, une relecture du seuil de doutes
   et de la conservation de `rejetee` après un retour arrière.
+
+## Mission 14 — CI de toutes les plateformes (23/11/2026)
+
+- **Fait** : scripts `scripts/ci/` pour Linux (amd64, arm64, armv7, binaires
+  statiques, archives et .deb), Windows (exe x86_64/aarch64 et installateur
+  NSIS, wintun.dll 0.14.1 aux SHA-256 épinglés), Android (arm64-v8a,
+  armeabi-v7a, x86_64, APK par ABI et universel, `.so` en LOAD 0x4000 et
+  zipalign 16 Kio) et images Docker du nœud, du serveur et du contrôleur en
+  amd64/arm64. Workflow `ci.yml` avec actions épinglées par empreinte,
+  permissions `contents: read`, concurrence, artifacts de 7 jours et caches ;
+  `dependabot.yml` hebdomadaire. `scripts/ci/lint.sh` couvre actionlint,
+  shellcheck, gofmt, go vet et cargo fmt ; `client-linux --version` ajouté
+  pour le test du paquet. Preuve `scripts/verifier-m14.sh` : lint vert, trois
+  binaires Linux statiques, .deb amd64 installé dans un Debian propre,
+  exe/installateur Windows x86_64, APK des trois ABI, images amd64/arm64
+  inspectées.
+- **Reste / non prouvé** : les runners `ubuntu-24.04-arm` et
+  `windows-11-arm`, l'exécution réelle du workflow, des caches et des
+  artifacts (à vérifier au premier push) ; l'installateur aarch64 et son refus
+  réel sur x64 (pas de chaîne ARM64 locale) ; les versions de Rust/JDK/SDK du
+  runner peuvent différer de cette machine.
+- **Demandé à qui** : à Gary, pousser la branche et vérifier le premier run
+  GitHub ainsi que le téléchargement des artifacts ; à Claude, relire les
+  empreintes d'actions et les scripts de packaging.
