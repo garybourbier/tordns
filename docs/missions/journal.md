@@ -216,3 +216,25 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Claude, relecture des preuves de négation et de la
   classification opt-out ; à Gary, un essai contre quelques zones signées
   réelles (NSEC et NSEC3) avant diffusion.
+
+## Relecture Claude du chantier 2 (23/11/2026)
+
+- **Corrigé** (tests d'attaque rouges avant le correctif) :
+  - `06c4048` DNSSEC Linux : les signatures hors de leur période de validité
+    étaient acceptées (rejeu sans fin), et une zone pouvait signer une zone
+    voisine (`example.test` signait `badexample.test` : miekg/dns ne compare
+    que des suffixes de chaîne).
+  - `b084858` Windows : `C:\ProgramData\TorDNS\maj` était inscriptible par
+    tout utilisateur alors que la tâche SYSTEM y lit l'état, la clé de
+    rotation et les installateurs → élévation en SYSTEM. Droits verrouillés
+    (NSIS + re-verrouillage avant chaque mise à jour), temporaire recréé en
+    exclusivité ; l'installateur initial est désormais déposé (sans lui la
+    première mise à jour était toujours refusée).
+  - `9c1aa4e` Registre : `/etat` publiait le contact et le défi des candidats.
+- **Reste / non prouvé** : l'effet réel d'icacls (Wine n'a pas d'ACL NTFS) ;
+  la sonde du registre exige des IP identiques à la référence (un domaine à
+  réponses variables, CDN, peut disqualifier un bénévole honnête : comparer
+  RCODE/AD et exiger une intersection) ; une mise à jour Linux refusée par le
+  service est retentée à chaque passage du minuteur.
+- **Demandé à qui** : à Gary, une VM Windows pour vérifier les droits de
+  `maj\` après installation.
