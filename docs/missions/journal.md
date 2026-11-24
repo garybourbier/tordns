@@ -514,24 +514,50 @@ Une entrée par mission : fait, reste, demandé à qui.
   commit, puis déposer lui-même la demande ; à Claude, relire le modèle de
   menace et le classement des problèmes connus.
 
-## Missions 24 à 26 — non faites (24/11/2026)
+## Mission 24 — image nœud Raspberry Pi (24/11/2026)
+
+- **Fait** : `noeud/raspberry/` (outil de clés `.onion` au format Tor, page
+  d'état `/` et `/etat`, `premier-demarrage.sh`, `inscription.sh`, pare-feu
+  nftables, unités systemd, `README.md` du matériel), `scripts/ci/image-rpi.sh`
+  + `rpi-partitions.py` + `rpi-outils.Dockerfile`. Image `0.8.0` de 614 Mio
+  compressés, ajoutée à `site/telechargements.json`, aux gabarits du site et à
+  la release (tâche `noeud-rpi`).
+- **Comment, sans root** : partitions de Raspberry Pi OS Lite extraites en
+  fichiers, éditées par `debugfs` et `mtools` dans un conteneur non privilégié
+  (`--user uid:gid`, sans montage ni périphérique), puis réinsérées et
+  arrondies à 4 Gio.
+- **Choix** : clés générées au premier démarrage (jamais dans l'image),
+  SSH et `userconfig` coupés, ce dernier **masqué** (`/dev/null`) car un preset
+  le réactive ; partition racine portée à 3 Gio à la construction ; QEMU
+  `raspi3b` avec `WatchdogDevice=/dev/watchdog666` dans la copie d'essai
+  seulement (le chien de garde émulé redémarre sinon toutes les 13 s).
+- **Différence assumée** : l'installation du nœud par `installer.sh --images
+  ghcr` se fait au premier démarrage, pas dans l'image — impossible d'exécuter
+  Docker dans le rootfs sans privilèges pendant la construction. Le premier
+  démarrage attend Docker et avertit si `noeud/images.txt` manque.
+- **Preuve** `scripts/verifier-m24.sh` : image sous 2 Go et empreinte vérifiée ;
+  inspection hors ligne (aucune clé, aucun marqueur, aucun compte à mot de
+  passe, SSH et `userconfig` désactivés, hôte `tordns`, pare-feu en `policy
+  drop` sauf le port 80) ; deux démarrages QEMU complets avec « pare-feu
+  appliqué » et « terminé », deux clés de 96 octets différentes ; Tor 0.4.9 de
+  l'hôte lit la clé et publie une adresse ; lint vert. `code=0`.
+- **Reste / non prouvé** : vrai Pi (démarrage, chien de garde, SD, SSD,
+  consommation), extension de partition sur carte réelle, installation par
+  images GHCR (aucune image publiée correspondant à `noeud/images.txt`),
+  inscription réelle au registre, page `tordns.local` vue d'un autre appareil,
+  et la tâche `noeud-rpi` de la release, jamais exécutée ici.
+- **Demandé à qui** : à Gary, flasher une carte et rapporter le journal série
+  du premier démarrage ; à Claude, relire `premier-demarrage.sh` et le
+  durcissement des unités systemd.
+
+## Missions 25 et 26 — non faites (24/11/2026)
 
 - **État** : arrêtées avant tout code, faute de moyens sur cette machine.
-- **Mission 24 — image Raspberry Pi** : la construction impose d'éditer une
-  image disque hors ligne (montage en boucle, `systemd-nspawn`, ou au minimum
-  `root` pour écrire dans la partition ext4) ; cette machine n'a pas de `sudo`
-  sans mot de passe et pas de QEMU hôte. Une voie sans privilèges existe
-  (`debugfs` + `proot` + `qemu-user-static` dans un conteneur non privilégié,
-  `mtools` pour la partition de démarrage), mais elle demande plusieurs heures
-  de mise au point et le téléchargement de Raspberry Pi OS Lite (≈ 500 Mo),
-  que la session n'a pas couverts. Rien n'a été laissé à moitié construit :
-  aucun fichier de `noeud/raspberry/` ni de `scripts/ci/image-rpi.sh` n'existe.
 - **Mission 25 — F-Droid** : demande `fdroidserver` officiel, NDK Android,
   récupération Maven vérifiée à la place de `client-android/libs/`, un build
   Gradle parallèle et un `fdroid build` complet ; non commencée.
 - **Mission 26 — client iOS** : demande une chaîne Apple (`xcodegen`, Xcode,
   `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie
   Rust partagée serait testable ici. Non commencée.
-- **À confier à Claude** : reprendre les missions 24, 25 et 26 dans cet ordre,
-  avec une machine disposant de `root` (ou d'un conteneur capable d'écrire une
-  image disque) pour la 24, et d'un runner macOS pour la 26.
+- **À confier à Claude** : reprendre les missions 25 puis 26, avec `fdroidserver`
+  et le NDK Android pour la 25, et un runner macOS pour la 26.
