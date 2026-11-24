@@ -514,24 +514,144 @@ Une entrée par mission : fait, reste, demandé à qui.
   commit, puis déposer lui-même la demande ; à Claude, relire le modèle de
   menace et le classement des problèmes connus.
 
-## Missions 24 à 26 — non faites (24/11/2026)
+## Mission 24 — image nœud Raspberry Pi (24/11/2026)
 
-- **État** : arrêtées avant tout code, faute de moyens sur cette machine.
-- **Mission 24 — image Raspberry Pi** : la construction impose d'éditer une
-  image disque hors ligne (montage en boucle, `systemd-nspawn`, ou au minimum
-  `root` pour écrire dans la partition ext4) ; cette machine n'a pas de `sudo`
-  sans mot de passe et pas de QEMU hôte. Une voie sans privilèges existe
-  (`debugfs` + `proot` + `qemu-user-static` dans un conteneur non privilégié,
-  `mtools` pour la partition de démarrage), mais elle demande plusieurs heures
-  de mise au point et le téléchargement de Raspberry Pi OS Lite (≈ 500 Mo),
-  que la session n'a pas couverts. Rien n'a été laissé à moitié construit :
-  aucun fichier de `noeud/raspberry/` ni de `scripts/ci/image-rpi.sh` n'existe.
-- **Mission 25 — F-Droid** : demande `fdroidserver` officiel, NDK Android,
-  récupération Maven vérifiée à la place de `client-android/libs/`, un build
-  Gradle parallèle et un `fdroid build` complet ; non commencée.
-- **Mission 26 — client iOS** : demande une chaîne Apple (`xcodegen`, Xcode,
-  `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie
-  Rust partagée serait testable ici. Non commencée.
-- **À confier à Claude** : reprendre les missions 24, 25 et 26 dans cet ordre,
-  avec une machine disposant de `root` (ou d'un conteneur capable d'écrire une
-  image disque) pour la 24, et d'un runner macOS pour la 26.
+- **Fait** : `noeud/raspberry/` (outil de clés `.onion` au format Tor, page
+  d'état `/` et `/etat`, `premier-demarrage.sh`, `inscription.sh`, pare-feu
+  nftables, unités systemd, `README.md` du matériel), `scripts/ci/image-rpi.sh`
+  + `rpi-partitions.py` + `rpi-outils.Dockerfile`. Image `0.8.0` de 614 Mio
+  compressés, ajoutée à `site/telechargements.json`, aux gabarits du site et à
+  la release (tâche `noeud-rpi`).
+- **Comment, sans root** : partitions de Raspberry Pi OS Lite extraites en
+  fichiers, éditées par `debugfs` et `mtools` dans un conteneur non privilégié
+  (`--user uid:gid`, sans montage ni périphérique), puis réinsérées et
+  arrondies à 4 Gio.
+- **Choix** : clés générées au premier démarrage (jamais dans l'image),
+  SSH et `userconfig` coupés, ce dernier **masqué** (`/dev/null`) car un preset
+  le réactive ; partition racine portée à 3 Gio à la construction ; QEMU
+  `raspi3b` avec `WatchdogDevice=/dev/watchdog666` dans la copie d'essai
+  seulement (le chien de garde émulé redémarre sinon toutes les 13 s).
+- **Différence assumée** : l'installation du nœud par `installer.sh --images
+  ghcr` se fait au premier démarrage, pas dans l'image — impossible d'exécuter
+  Docker dans le rootfs sans privilèges pendant la construction. Le premier
+  démarrage attend Docker et avertit si `noeud/images.txt` manque.
+- **Preuve** `scripts/verifier-m24.sh` : image sous 2 Go et empreinte vérifiée ;
+  inspection hors ligne (aucune clé, aucun marqueur, aucun compte à mot de
+  passe, SSH et `userconfig` désactivés, hôte `tordns`, pare-feu en `policy
+  drop` sauf le port 80) ; deux démarrages QEMU complets avec « pare-feu
+  appliqué » et « terminé », deux clés de 96 octets différentes ; Tor 0.4.9 de
+  l'hôte lit la clé et publie une adresse ; lint vert. `code=0`.
+- **Reste / non prouvé** : vrai Pi (démarrage, chien de garde, SD, SSD,
+  consommation), extension de partition sur carte réelle, installation par
+  images GHCR (aucune image publiée correspondant à `noeud/images.txt`),
+  inscription réelle au registre, page `tordns.local` vue d'un autre appareil,
+  et la tâche `noeud-rpi` de la release, jamais exécutée ici.
+- **Demandé à qui** : à Gary, flasher une carte et rapporter le journal série
+  du premier démarrage ; à Claude, relire `premier-demarrage.sh` et le
+  durcissement des unités systemd.
+
+## Mission 25 — Publication sur F-Droid (24/11/2026)
+
+- **Fait** : `metadata/org.tordns.client.yml` (MIT, NDK `r26b`, Rust par
+  `sudo`/`prebuild`, construction confiée à `client-android/scripts/construire.sh`,
+  `commit:` sur le SHA de la mission, AutoUpdateMode `Version`, UpdateCheckMode
+  `Tags`), métadonnées fastlane fr-FR et en-US (titre, résumés, description,
+  journal `800`), `docs/fdroid.md` (procédure de soumission à la main, c'est
+  Gary qui ouvre la demande), `client-android/DEPENDANCES.md` (licences et
+  empreintes), `scripts/verifier-m25.sh`.
+- **Choix** : pas de Gradle. F-Droid accepte des commandes `build:`
+  arbitraires, donc la recette appelle le script maison ; il a fallu y dériver
+  la version du tag (`scripts/ci/version.sh`) et écrire le manifeste dans une
+  copie temporaire, `aapt2` 2.20 ignorant `--version-code`/`--version-name`
+  quand le manifeste les déclare.
+- **Obstacle** : `fdroid build` refuse les `.jar` versionnés (« Found Fichier
+  Java JAR »). `client-android/libs/` disparaît au profit de
+  `client-android/scripts/telecharger-libs.sh`, qui récupère dnsjava 3.6.3 et
+  slf4j-api 2.0.16 sur Maven Central avec empreintes SHA-256 épinglées dans
+  `client-android/build/libs/` (cache local, remplacement d'un jar corrompu
+  vérifié).
+- **Seconde obstruction** : l'APK portait `debuggable` (option `--debug-mode`
+  d'`aapt2 link`), refusé par F-Droid. La construction de publication ne
+  l'active plus ; `DEBUG=oui` la remet pour le diagnostic adb documenté.
+- **Preuve** `scripts/verifier-m25.sh` : `fdroid lint` officiel sans remarque ;
+  `fdroid build --test` officiel (fdroidserver 2.4.2 sous Python 3.14) sur un
+  dépôt servi en HTTP local, produisant `0.8.0 (800)` avec trois ABI, dnsjava
+  et `TorVpnService` dans le dex ; `fdroid scanner` sans classe non libre ;
+  aucune archive Java dans les sources. `code=0`.
+- **Non prouvé** : l'acceptation par F-Droid et la construction dans leur
+  buildserver (ni libvirt ni leur image ici) ; `sudo`/`prebuild` de la recette
+  sont retirés localement puisque Rust, le SDK et le NDK sont déjà installés ;
+  aucune capture d'écran fastlane (pas d'appareil) ; la comparaison
+  reproductible avec l'APK signé par Gary n'est pas faite.
+- **Demandé à qui** : à Gary, ouvrir la demande sur fdroiddata (MR avec
+  `metadata/org.tordns.client.yml` et `fastlane/`), puis pousser le tag `v0.8.0`
+  que `UpdateCheckMode: Tags` attend ; à Claude, relire la recette et les
+  métadonnées avant envoi.
+
+## Mission 26 — Client iOS (24/11/2026)
+
+- **Fait** : la logique Tor/DoH quitte `client-android/rust` pour un crate
+  partagé `outils/arti-rust` (`tordns-tor`) ; Android ne garde que le pont JNI,
+  iOS un pont C (`client-ios/rust`, ABI de `rust/include/tordns.h`). Livrés
+  aussi : application SwiftUI (marche/arrêt, adresses, DNSSEC, test de fuite,
+  empreinte mémoire), extension `NEPacketTunnelProvider` limitée au DNS,
+  `project.yml` pour `xcodegen` (trois cibles, aucun `.xcodeproj` versionné),
+  entitements `packet-tunnel-provider` et groupe d'applications partagé,
+  tests de paquets DNS, `scripts/ci/client-ios.sh` et job CI `ios` sur
+  `macos-latest` (secrets Apple facultatifs, étape sautée sinon),
+  `scripts/verifier-m26.sh`.
+- **Choix** : `NEDNSProxyProvider` écarté. La documentation Apple (TN3134 et
+  la page du proxy DNS) le réserve aux appareils supervisés, avec un profil
+  `com.apple.dnsProxy.managed` installé par MDM depuis iOS 15 : une application
+  grand public ne pourrait pas l'activer. Le tunnel de paquets n'inclut aucune
+  route (`includedRoutes = []`), annonce un seul serveur DNS et n'attrape donc
+  que l'UDP/53 ; ce qui n'y passe pas par Tor est abandonné, jamais relayé en
+  clair. Le manifeste signé ne sert qu'à sa liste d'adresses : l'App Store est
+  le seul canal de mise à jour, aucune clé n'est sur l'appareil.
+- **Obstacle** : `cargo check --target aarch64-apple-ios` échoue ici — `ring`
+  compile du C et exige `xcrun` et le SDK iOS. La cible Rust s'installe, la
+  compilation non. Deux pièges du vérificateur, déjà connus de la mission 25 :
+  `cargo test | grep -q` tue cargo par SIGPIPE, et `nm | grep -q` fait de même ;
+  les deux sorties sont désormais capturées avant filtrage.
+- **Preuve** `scripts/verifier-m26.sh` : 6 tests du crate partagé et 6 du pont
+  C verts sur l'hôte ; 9 fonctions C déclarées dans l'en-tête, exportées et
+  liées dans `libtordns_ios.a` ; plists et entitements lus, tunnel de paquets
+  conforme, aucun `dns-proxy` ; `project.yml` en YAML valide dont le chemin
+  Rust correspond au script ; Swift n'appelle que l'ABI déclarée ; non-
+  régression Android (APK arm64 reconstruit, quatre symboles JNI exportés) ;
+  `actionlint` vert sur `ci.yml` ; aucune clé ni adresse `.onion` réelle.
+  `code=0`. `scripts/ci/lint.sh` et `scripts/verifier-m25.sh` rejoués verts
+  après le déplacement du crate.
+- **Non prouvé** : compilation Swift, projet `xcodegen`, extension et tests
+  simulateur (aucun macOS ici) ; archive signée, TestFlight et exécution du
+  job `ios` ; mémoire réelle d'Arti dans l'extension (limite iOS ≈ 50 Mo) et
+  éventuel déplacement d'Arti dans l'application ; activation du tunnel sur un
+  appareil réel ; sortie du DNS en TCP/53, non traitée.
+- **Demandé à qui** : à Claude, avec un Mac, lancer
+  `scripts/ci/client-ios.sh`, corriger ce que la compilation Swift révélera et
+  mesurer la mémoire de l'extension ; à Gary, l'équipe Apple, l'ouverture des
+  capacités Network Extensions et le choix de publier ou non sur l'App Store.
+
+## Relecture après la mission 26 — les preuves des missions précédentes (24/11/2026)
+
+- **Fait** : les vérificateurs qui compilent le client Android ont été rejoués
+  après le déplacement du crate Tor. `scripts/verifier-m12.sh`,
+  `scripts/verifier-m13.sh`, `scripts/verifier-m25.sh` et
+  `scripts/verifier-m26.sh` restent verts.
+- **Régression trouvée et corrigée** : `scripts/verifier-m18.sh` échouait —
+  l'image Raspberry Pi de la mission 24 était dans `site/telechargements.json`
+  et dans `release.yml`, mais absente du tableau de téléchargement du README.
+  La ligne et le renvoi vers `noeud/raspberry/README.md` sont ajoutés ;
+  le vérificateur repasse (`code=0`, 16 liens identiques à la release).
+- **Reproductibilité revérifiée à la main** : deux constructions successives de
+  `scripts/ci/client-android.sh` donnent quatre APK identiques octet pour octet
+  (arm64-v8a `f7aada8b…`, armeabi-v7a `fdedef9e…`, x86_64 `a3537834…`,
+  universel `72513819…`), donc le nouveau crate ne casse pas le déterminisme.
+- **Non prouvé** : `scripts/verifier-m14.sh` (section 4) et
+  `scripts/verifier-m21.sh` (section 3) ne peuvent plus finir ici — `makensis`
+  n'est pas installé et n'existe dans aucun dépôt de cette machine (Arch a
+  retiré le paquet `nsis`, Manjaro ne le propose pas) ; l'installation demande
+  root. Leurs preuves d'origine restent dans les commits des missions 14 et 21 ;
+  à rejouer sur une machine avec `nsis`.
+- **Demandé à qui** : à Gary, fournir `makensis` (paquet `nsis`) pour rejouer
+  m14 et m21 en entier.

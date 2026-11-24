@@ -1,0 +1,11 @@
+TorDNS résout le DNS de l'appareil à travers Tor, sans root et sans configurer de serveur.
+
+L'application ouvre un tunnel VPN local qui capture seulement les requêtes DNS de l'appareil. Celles-ci passent par Arti, l'implémentation officielle de Tor en Rust, jusqu'au service .onion de TorDNS, qui répond depuis Unbound. Le trafic des autres applications sort normalement par le réseau physique : seul le DNS est routé vers Tor.
+
+• Rien à installer côté serveur : une adresse .onion suffit.
+• Aucun journal des requêtes, ni sur le téléphone ni sur le service.
+• Cache local borné pour limiter les circuits, TTL respectés.
+• Validation DNSSEC par dnsjava.
+• Mises à jour de l'application vérifiées par signature Ed25519 avant installation.
+
+Le mode avancé laisse choisir l'adresse .onion du service utilisé.

@@ -1,0 +1,14 @@
+[Unit]
+Description=TorDNS — inscription au registre communauté
+Documentation=file:/opt/tordns/noeud/README.md
+ConditionPathExists=/etc/tordns/tordns.txt
+After=tordns.service tordns-premier-demarrage.service
+Wants=tordns.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=0
+ExecStart=/usr/local/lib/tordns/inscription.sh
+StandardOutput=journal+console
+StandardError=journal+console

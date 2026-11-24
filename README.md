@@ -26,6 +26,7 @@ sont produits par `release.yml` et affichés par le site.
 | Linux | armv7 | [archive](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-armv7.tar.gz) |
 | OpenWrt | ramips/mt7621 | [paquet apk](https://github.com/garybourbier/tordns/releases/latest/download/tordns-0.8.0-r1-openwrt-mipsel_24kc.apk) |
 | OpenWrt | mediatek/filogic | [paquet apk](https://github.com/garybourbier/tordns/releases/latest/download/tordns-0.8.0-r1-openwrt-aarch64_cortex-a53.apk) |
+| Raspberry Pi (nœud) | arm64 | [image prête à flasher](https://github.com/garybourbier/tordns/releases/latest/download/tordns-noeud-rpi-0.8.0-arm64.img.xz) |
 | Android | universel | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-universel.apk) |
 | Android | arm64-v8a | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-arm64-v8a.apk) |
 | Android | armeabi-v7a | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-armeabi-v7a.apk) |
@@ -107,6 +108,11 @@ Internet. Il demande environ 1 Go de RAM.
 ```bash
 git clone https://github.com/garybourbier/tordns.git && cd tordns && sudo ./noeud/installer.sh
 ```
+
+Pour un Raspberry Pi 4 ou 5, l'image `tordns-noeud-rpi-0.8.0-arm64.img.xz`
+contient Debian allégé et le nœud déjà installé : `xz -dc … | sudo dd of=/dev/sdX`,
+puis la configuration se fait sur la carte `boot`
+([détails](noeud/raspberry/README.md)).
 
 Les images multi-arch sont publiées sur GHCR. Pour les utiliser par empreinte,
 télécharger `images.txt` dans la release, le placer à côté de `noeud/`, puis

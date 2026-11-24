@@ -1,0 +1,66 @@
+Categories:
+  - Internet
+License: MIT
+AuthorName: Gary Bourbier
+SourceCode: https://github.com/garybourbier/tordns
+IssueTracker: https://github.com/garybourbier/tordns/issues
+WebSite: https://garybourbier.github.io/tordns/
+
+Summary: DNS chiffré dans Tor
+Description: |
+  TorDNS résout le DNS de l'appareil à travers Tor, sans root et sans
+  configurer de serveur.
+
+  L'application ouvre un tunnel VPN local (VpnService) qui capture seulement
+  les requêtes DNS de l'appareil. Celles-ci passent par Arti, l'implémentation
+  officielle de Tor en Rust, jusqu'au service .onion de TorDNS, qui répond
+  depuis Unbound. Le trafic des autres applications sort normalement par le
+  réseau physique : seul le DNS est routé vers Tor.
+
+  - Rien à installer côté serveur : une adresse .onion suffit.
+  - Aucun journal des requêtes, ni sur le téléphone ni sur le service.
+  - Cache local borné pour limiter les circuits, TTL respectés.
+  - Validation DNSSEC par dnsjava.
+  - Mises à jour de l'application vérifiées par signature Ed25519.
+
+  Le mode avancé laisse choisir l'adresse .onion du service utilisé.
+RepoType: git
+Repo: https://github.com/garybourbier/tordns
+
+Builds:
+  - versionName: '0.8.0'
+    versionCode: 800
+    commit: 9b9eac970e8fa65aa3c58d049ab0fceb3d963c68
+    ndk: r26b
+    sudo:
+      - apt-get update
+      - apt-get install -y rustup gcc libc-dev
+    prebuild:
+      - rustup default 1.96.1
+      - rustup target add armv7-linux-androideabi aarch64-linux-android x86_64-linux-android
+    build:
+      - ABIS="arm64-v8a armeabi-v7a x86_64" UNIVERSEL=oui ./client-android/scripts/construire.sh
+    output: client-android/build/tordns-client-universel-NON-SIGNE-POUR-PUBLICATION.apk
+
+MaintainerNotes: |
+  La construction n'utilise pas Gradle : scripts/construire.sh assemble l'APK
+  avec aapt2, javac, d8 et zipalign (voir client-android/README.md). Les
+  dépendances Java (dnsjava, slf4j-api) viennent de Maven Central avec une
+  empreinte SHA-256 épinglée dans client-android/scripts/telecharger-libs.sh ;
+  aucun .jar n'est versionné.
+
+  L'APK non signé est reproductible : SOURCE_DATE_EPOCH vient du commit,
+  l'ordre et les dates des entrées du zip sont fixés, les chemins sont
+  remappés dans les .so. La signature de Gary s'ajoute après, hors F-Droid.
+
+  Piste build reproductible : une fois la version publiée par Gary, ajouter
+  AllowedAPKSigningKeys avec l'empreinte SHA-256 du certificat de signature de
+  Gary pour que F-Droid publie son APK s'il est identique au leur.
+
+  Le premier envoi doit viser un tag (v0.8.0) : le commit ci-dessus est celui
+  qui contient cette recette, pas le tag.
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.8.0
+CurrentVersionCode: 800

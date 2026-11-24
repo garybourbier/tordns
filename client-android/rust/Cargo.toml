@@ -10,19 +10,9 @@ name = "tordns_arti"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-arti-client = { version = "0.48", default-features = false, features = [
-  "tokio",
-  "rustls",
-  "onion-service-client",
-  "static-sqlite",
-  "compression",
-] }
-futures = "0.3"
 jni = "0.21"
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
-tor-rtcompat = "0.48.0"
 tordns-manifeste = { path = "../../outils/manifeste-rust" }
+tordns-tor = { path = "../../outils/arti-rust" }
 
 [profile.release]
 opt-level = "z"

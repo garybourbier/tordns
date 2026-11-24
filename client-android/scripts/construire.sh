@@ -18,8 +18,15 @@ CONSTRUCTION="$RACINE/build"
 ABIS="${ABIS:-arm64-v8a}"
 UNIVERSEL="${UNIVERSEL:-non}"
 KS="${DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}"
+LIBRAIRIES="${LIBRAIRIES:-$RACINE/build/libs}"
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$RACINE" log -1 --format=%ct 2>/dev/null || echo 0)}
 export SOURCE_DATE_EPOCH
+# Version portée par l'APK : celle du tag (ou de noeud/VERSION), pour que
+# F-Droid et la release annoncent la même chose. versionCode = majeur, mineur,
+# correctif concaténés (0.8.0 → 800), donc toujours croissant d'une version à
+# l'autre.
+VERSION_NAME=${VERSION_NAME:-$("$RACINE/../scripts/ci/version.sh")}
+VERSION_CODE=${VERSION_CODE:-$(printf '%s' "$VERSION_NAME" | awk -F. '{printf "%d", $1*10000 + $2*100 + $3}')}
 
 for outil in "$OUTILS/aapt2" "$OUTILS/d8" "$OUTILS/zipalign" "$OUTILS/apksigner" \
 	"$ANDROID_JAR" "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"; do
@@ -52,37 +59,58 @@ configurer_abi() {
 	export "CARGO_TARGET_${TARGET_MAJ}_RUSTFLAGS=--remap-path-prefix=$RACINE=. -C link-arg=-Wl,--build-id=sha1 -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
 }
 
-echo "== 1. Bibliothèques Tor (Arti) : $ABIS =="
+echo "== 1. Dépendances Java (Maven Central) =="
+LIBRAIRIES="$LIBRAIRIES" "$RACINE/scripts/telecharger-libs.sh"
+ls -1 "$LIBRAIRIES"/*.jar >/dev/null || { echo "ERREUR : aucune dépendance Java dans $LIBRAIRIES" >&2; exit 1; }
+
+echo "== 2. Bibliothèques Tor (Arti) : $ABIS =="
 for abi in $ABIS; do
 	configurer_abi "$abi"
 	echo "-- $abi ($TARGET_RUST)"
 	(cd "$RACINE/rust" && cargo build --release --locked --target "$TARGET_RUST")
 done
 
-echo "== 2. Ressources et R.java =="
-rm -rf "$CONSTRUCTION"
+echo "== 3. Ressources et R.java =="
+# On ne supprime que ce que l'on produit : build/libs/ garde les dépendances.
+rm -rf "$CONSTRUCTION/gen" "$CONSTRUCTION/classes" "$CONSTRUCTION/dex" \
+	"$CONSTRUCTION/apk" "$CONSTRUCTION/res.zip" "$CONSTRUCTION/base.apk"
 mkdir -p "$CONSTRUCTION/gen" "$CONSTRUCTION/classes" "$CONSTRUCTION/dex"
+# aapt2 2.20 ignore --version-code/--version-name quand le manifeste les
+# déclare : la version est donc écrite dans une copie du manifeste.
+MANIFESTE="$CONSTRUCTION/AndroidManifest.xml"
+sed -e "s/android:versionCode=\"[0-9]*\"/android:versionCode=\"$VERSION_CODE\"/" \
+	-e "s/android:versionName=\"[^\"]*\"/android:versionName=\"$VERSION_NAME\"/" \
+	"$RACINE/app/src/main/AndroidManifest.xml" >"$MANIFESTE"
+grep -q "versionCode=\"$VERSION_CODE\"" "$MANIFESTE" || {
+	echo "ERREUR : version introuvable dans $MANIFESTE" >&2
+	exit 1
+}
 "$OUTILS/aapt2" compile --dir "$RACINE/app/src/main/res" -o "$CONSTRUCTION/res.zip"
+# Un APK de publication ne doit pas être débogable (F-Droid refuse un
+# manifeste avec debuggable) : --debug-mode n'est passé que sur demande.
+LIAISON_DEBUG=()
+if [ "${DEBUG:-non}" = oui ]; then
+	LIAISON_DEBUG=(--debug-mode)
+fi
 "$OUTILS/aapt2" link \
 	-o "$CONSTRUCTION/base.apk" \
 	-I "$ANDROID_JAR" \
-	--manifest "$RACINE/app/src/main/AndroidManifest.xml" \
+	--manifest "$MANIFESTE" \
 	--java "$CONSTRUCTION/gen" \
-	--min-sdk-version 26 --target-sdk-version 34 --debug-mode \
-	--version-code 2 --version-name 0.2 \
-	"$CONSTRUCTION/res.zip"
+	--min-sdk-version 26 --target-sdk-version 34 \
+	"${LIAISON_DEBUG[@]}" "$CONSTRUCTION/res.zip"
 
-echo "== 3. Java puis DEX =="
+echo "== 4. Java puis DEX =="
 find "$RACINE/app/src/main/java" "$CONSTRUCTION/gen" -name '*.java' -print >"$CONSTRUCTION/sources.txt"
 javac --release 11 -Xlint:all -Werror \
-	-classpath "$ANDROID_JAR:$RACINE/libs/*" \
+	-classpath "$ANDROID_JAR:$LIBRAIRIES/*" \
 	-d "$CONSTRUCTION/classes" \
 	@"$CONSTRUCTION/sources.txt"
 (cd "$CONSTRUCTION/classes" && jar cf "$CONSTRUCTION/classes.jar" .)
 "$OUTILS/d8" --release --min-api 26 --lib "$ANDROID_JAR" \
-	--output "$CONSTRUCTION/dex" "$CONSTRUCTION/classes.jar" "$RACINE"/libs/*.jar
+	--output "$CONSTRUCTION/dex" "$CONSTRUCTION/classes.jar" "$LIBRAIRIES"/*.jar
 
-echo "== 4. Clé de débogage jetable =="
+echo "== 5. Clé de débogage jetable =="
 mkdir -p "$(dirname "$KS")"
 if [ ! -f "$KS" ]; then
 	keytool -genkeypair -noprompt -keystore "$KS" -storepass android \
@@ -115,7 +143,7 @@ monter_apk() {
 	"$OUTILS/apksigner" verify "${nom%.apk}-debug.apk" >/dev/null
 }
 
-echo "== 5. APK par ABI =="
+echo "== 6. APK par ABI =="
 for abi in $ABIS; do
 	APK="$CONSTRUCTION/tordns-client-$abi-NON-SIGNE-POUR-PUBLICATION.apk"
 	monter_apk "$APK" "$abi"
@@ -127,7 +155,7 @@ if [ "$ABIS" = "arm64-v8a" ] && [ -f "$CONSTRUCTION/tordns-client-arm64-v8a-NON-
 fi
 
 if [ "$UNIVERSEL" = oui ]; then
-	echo "== 6. APK universel =="
+	echo "== 7. APK universel =="
 	APK="$CONSTRUCTION/tordns-client-universel-NON-SIGNE-POUR-PUBLICATION.apk"
 	# shellcheck disable=SC2086
 	monter_apk "$APK" $ABIS

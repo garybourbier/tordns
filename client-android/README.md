@@ -104,7 +104,7 @@ SERVFAIL bien formé, diagnostic du DNS privé, et 10 000 paquets hostiles.
 **3. APK et chargement JNI sur appareil** :
 
 ```
-package: org.tordns.client  versionName=0.1  minSdk=26  targetSdk=34
+package: org.tordns.client  versionName=0.2  minSdk=26  targetSdk=34
 native-code: 'arm64-v8a'
 lib/arm64-v8a/libtordns_arti.so   7 688 656 octets
 primaryCpuAbi=arm64-v8a
@@ -114,9 +114,12 @@ primaryCpuAbi=arm64-v8a
 Installé et lancé sur un Samsung SM-A546B (Android 16, arm64) ; `zipalign -c -p 4`
 passe, signature APK vérifiée.
 
-**4. Chemin Arti/DoH complet sur l'appareil, sans VPN.** L'APK étant construit
-en mode debug (`--debug-mode`), une intention de diagnostic réservée aux builds
-débogables démarre le bootstrap puis une requête, même écran verrouillé :
+**4. Chemin Arti/DoH complet sur l'appareil, sans VPN.** L'APK de publication
+n'est pas débogable (F-Droid refuse un manifeste `debuggable`) ; le diagnostic
+ci-dessous se fait donc sur une construction jetable, `DEBUG=oui
+scripts/construire.sh`, dont le manifeste porte `--debug-mode`. Une intention
+de diagnostic réservée aux builds débogables démarre alors le bootstrap puis une
+requête, même écran verrouillé :
 
 ```bash
 adb shell am start -n org.tordns.client/.MainActivity \
@@ -152,8 +155,11 @@ zéro erreur), puis les paquets ICMP sortent normalement par le réseau physique
 
 ## Mises à jour, adresses signées, DNSSEC (Mission 12)
 
-`dnsjava` 3.6.3 et `slf4j-api` 2.0.16 sont fournis dans `libs/` (aucun accès
-réseau au build). L'APK construit ici porte `versionCode 2`, `versionName 0.2`.
+`dnsjava` 3.6.3 et `slf4j-api` 2.0.16 ne sont plus versionnés dans le dépôt :
+`scripts/telecharger-libs.sh` les télécharge depuis Maven Central avec une
+empreinte SHA-256 épinglée dans `build/libs/` (le cache rend les constructions
+suivantes hors ligne). L'APK porte la version du tag (`versionCode 800`,
+`versionName 0.8.0` pour `v0.8.0`, ou `noeud/VERSION` hors tag).
 
 - **Vérification en arrière-plan** : bouton « Vérifier les mises à jour ». Le
   manifeste et sa signature sont téléchargés par Arti (`/maj/`), vérifiés en

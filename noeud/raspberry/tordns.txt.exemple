@@ -1,0 +1,9 @@
+# TorDNS — demande d'inscription au registre communauté (Mission 24).
+#
+# À copier sous le nom tordns.txt à la racine de la partition de démarrage
+# (celle que l'ordinateur voit quand la carte SD est insérée), avant de
+# brancher le Raspberry Pi. Une ligne « clé=valeur » par renseignement ;
+# laisser contact vide si l'on ne veut donner aucun moyen de recontact.
+#
+#registre=exempleexempleexempleexempleexempleexempleexempleexemple.onion
+#contact=

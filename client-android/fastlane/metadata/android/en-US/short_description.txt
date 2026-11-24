@@ -1,0 +1,1 @@
+Encrypted DNS through Tor, no root and no server to set up.

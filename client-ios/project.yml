@@ -1,0 +1,109 @@
+# Projet Xcode engendré par xcodegen : le `.xcodeproj` n'est jamais versionné.
+# `xcodegen generate` à la racine de client-ios produit TorDNS.xcodeproj.
+#
+# Choix du mécanisme réseau : `NEPacketTunnelProvider` et non
+# `NEDNSProxyProvider`. La documentation Apple (TN3134, « Deploying a DNS proxy
+# provider ») réserve le proxy DNS aux appareils supervisés, avec un profil
+# `com.apple.dnsProxy.managed` installé par MDM depuis iOS 15 : une application
+# grand public ne pourrait pas l'activer. Le tunnel de paquets avec
+# `matchDomains: [""]` ne capture que le DNS et demande, lui, l'ouverture
+# « Personal VPN » de l'App Store, soit la capacité
+# `packet-tunnel-provider` de `com.apple.developer.networking.networkextension`
+# (voir Config/TorDNS.entitlements). Voir README.md.
+name: TorDNS
+options:
+  bundleIdPrefix: org.tordns.client
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.8.0"
+    CURRENT_PROJECT_VERSION: "800"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+    # La bibliothèque Rust est produite par scripts/construire-rust.sh dans
+    # build/rust/<plateforme> et liée telle quelle : aucune dépendance externe
+    # n'est téléchargée par Xcode.
+    OTHER_LDFLAGS:
+      - "-L$(SRCROOT)/build/rust/$(PLATFORM_NAME)"
+      - "-ltordns_ios"
+      - "-lc++"
+    # L'ABI C du crate Rust (include/tordns.h) est exposée à Swift par
+    # l'en-tête de pont.
+    SWIFT_OBJC_BRIDGING_HEADER: "$(SRCROOT)/Config/TorDNS-Bridging-Header.h"
+    HEADER_SEARCH_PATHS:
+      - "$(SRCROOT)/rust/include"
+targets:
+  TorDNS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/App
+      - path: Sources/Partage
+    info:
+      path: Config/Info.plist
+    entitlements:
+      path: Config/TorDNS.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tordns.client.ios
+        PRODUCT_NAME: TorDNS
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(TORDNS_TEAM_ID)
+    dependencies:
+      - target: TorDNSTunnel
+        embed: true
+        codeSign: true
+    preBuildScripts:
+      - name: Bibliothèque Tor (Rust)
+        path: scripts/construire-rust.sh
+        basedOnDependencyAnalysis: false
+  TorDNSTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/Extension
+      - path: Sources/Partage
+    info:
+      path: Config/Info-extension.plist
+    entitlements:
+      path: Config/Extension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tordns.client.ios.tunnel
+        PRODUCT_NAME: TorDNSTunnel
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(TORDNS_TEAM_ID)
+    dependencies:
+      - sdk: NetworkExtension.framework
+  TorDNSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: TorDNS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.tordns.client.ios.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: $(TORDNS_TEAM_ID)
+schemes:
+  TorDNS:
+    build:
+      targets:
+        TorDNS: all
+        TorDNSTunnel: all
+        TorDNSTests: [test]
+    test:
+      targets:
+        - TorDNSTests
+    run:
+      config: Debug

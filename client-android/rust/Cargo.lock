@@ -4890,13 +4890,9 @@ dependencies = [
 name = "tordns-arti"
 version = "0.1.0"
 dependencies = [
- "arti-client",
- "futures",
  "jni",
- "rustls",
- "tokio",
- "tor-rtcompat",
  "tordns-manifeste",
+ "tordns-tor",
 ]
 
 [[package]]
@@ -4906,6 +4902,17 @@ dependencies = [
  "ed25519-dalek 2.2.0",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tordns-tor"
+version = "0.1.0"
+dependencies = [
+ "arti-client",
+ "futures",
+ "rustls",
+ "tokio",
+ "tor-rtcompat",
 ]
 
 [[package]]

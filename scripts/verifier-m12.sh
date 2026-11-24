@@ -63,8 +63,10 @@ if [ -f "$SDK/platforms/android-34/android.jar" ]; then
     [ -x "$OUTILS/apksigner" ] || OUTILS="$SDK/build-tools/34.0.0"
     "$OUTILS/apksigner" verify "$APK"
     badging="$("$OUTILS/aapt2" dump badging "$APK")"
-    grep -q "versionCode='2'" <<<"$badging" ||
-        echec "l’APK n’est pas en versionCode 2"
+    version="$("$RACINE/scripts/ci/version.sh")"
+    code=$(printf '%s' "$version" | awk -F. '{printf "%d", $1*10000 + $2*100 + $3}')
+    grep -q "versionCode='$code'" <<<"$badging" ||
+        echec "l’APK n’est pas en versionCode $code ($version)"
     unzip -p "$APK" lib/arm64-v8a/libtordns_arti.so > "$TMP/libtordns_arti.so"
     symboles="$(nm -D "$TMP/libtordns_arti.so")"
     grep -q Java_org_tordns_client_Arti_verifierManifeste <<<"$symboles" ||

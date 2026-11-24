@@ -1,0 +1,24 @@
+[Unit]
+Description=TorDNS — page d'état locale (LAN, mDNS)
+Documentation=file:/opt/tordns/noeud/raspberry/README.md
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tordns-etat-local -ecoute 0.0.0.0:80 -donnees /var/lib/tordns -code /opt/tordns
+Restart=always
+RestartSec=5
+DynamicUser=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadOnlyPaths=/opt/tordns /var/lib/tordns
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target
