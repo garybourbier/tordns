@@ -1,5 +1,8 @@
 //! Preuve hôte : bootstrap Arti puis requête DoH vers un .onion local.
 //! Usage : cargo run --example doh -- <adresse>.onion [domaine]
+//!
+//! Depuis `outils/arti-rust`. L'adresse doit être un service caché de test :
+//! aucun nom de domaine réel n'est journalisé, aucun fichier n'est gardé.
 
 use std::time::Duration;
 
@@ -21,7 +24,7 @@ fn main() {
     std::fs::create_dir_all(&base).unwrap();
 
     eprintln!("bootstrap Arti (peut prendre 30 à 90 s)…");
-    tordns_arti::demarrer_hote(
+    tordns_tor::demarrer(
         base.join("etat").to_str().unwrap(),
         base.join("cache").to_str().unwrap(),
     )
@@ -29,7 +32,7 @@ fn main() {
     eprintln!("Tor prêt, POST DoH vers {onion}");
 
     let reponse =
-        tordns_arti::doh_hote(&onion, &requete(&domaine), Duration::from_secs(60)).expect("DoH");
+        tordns_tor::doh(&onion, &requete(&domaine), Duration::from_secs(60)).expect("DoH");
     println!(
         "réponse DoH : {} octets, id 0x{:02x}{:02x}, rcode {}, réponses {}",
         reponse.len(),

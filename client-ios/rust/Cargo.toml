@@ -1,0 +1,22 @@
+[package]
+name = "tordns-ios"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+publish = false
+description = "Pont C entre l'application iOS TorDNS et le crate Tor partagé"
+
+[lib]
+name = "tordns_ios"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+tordns-manifeste = { path = "../../outils/manifeste-rust" }
+tordns-tor = { path = "../../outils/arti-rust" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

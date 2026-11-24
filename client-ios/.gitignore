@@ -1,0 +1,7 @@
+# Artefacts de compilation : la bibliothèque Rust est produite par
+# scripts/construire-rust.sh, le projet Xcode par xcodegen.
+build/
+rust/target/
+*.xcodeproj
+*.xcworkspace
+DerivedData/

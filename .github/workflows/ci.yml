@@ -119,6 +119,23 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  ios:
+    name: iOS (simulateur)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      # Secrets facultatifs : absents, l'archive signée et TestFlight sont
+      # sautés (voir scripts/ci/client-ios.sh).
+      TORDNS_TEAM_ID: ${{ secrets.TORDNS_TEAM_ID }}
+      TORDNS_APPLE_ID: ${{ secrets.TORDNS_APPLE_ID }}
+      TORDNS_APPLE_MOT_DE_PASSE: ${{ secrets.TORDNS_APPLE_MOT_DE_PASSE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # xcodegen n'a pas d'empreinte de commit publiable : il est installé par
+      # Homebrew, version imprimée dans le journal du job.
+      - run: brew install xcodegen && xcodegen --version
+      - run: ./scripts/ci/client-ios.sh
+
   android:
     name: Android
     runs-on: ubuntu-latest
