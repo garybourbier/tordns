@@ -631,3 +631,27 @@ Une entrée par mission : fait, reste, demandé à qui.
   `scripts/ci/client-ios.sh`, corriger ce que la compilation Swift révélera et
   mesurer la mémoire de l'extension ; à Gary, l'équipe Apple, l'ouverture des
   capacités Network Extensions et le choix de publier ou non sur l'App Store.
+
+## Relecture après la mission 26 — les preuves des missions précédentes (24/11/2026)
+
+- **Fait** : les vérificateurs qui compilent le client Android ont été rejoués
+  après le déplacement du crate Tor. `scripts/verifier-m12.sh`,
+  `scripts/verifier-m13.sh`, `scripts/verifier-m25.sh` et
+  `scripts/verifier-m26.sh` restent verts.
+- **Régression trouvée et corrigée** : `scripts/verifier-m18.sh` échouait —
+  l'image Raspberry Pi de la mission 24 était dans `site/telechargements.json`
+  et dans `release.yml`, mais absente du tableau de téléchargement du README.
+  La ligne et le renvoi vers `noeud/raspberry/README.md` sont ajoutés ;
+  le vérificateur repasse (`code=0`, 16 liens identiques à la release).
+- **Reproductibilité revérifiée à la main** : deux constructions successives de
+  `scripts/ci/client-android.sh` donnent quatre APK identiques octet pour octet
+  (arm64-v8a `f7aada8b…`, armeabi-v7a `fdedef9e…`, x86_64 `a3537834…`,
+  universel `72513819…`), donc le nouveau crate ne casse pas le déterminisme.
+- **Non prouvé** : `scripts/verifier-m14.sh` (section 4) et
+  `scripts/verifier-m21.sh` (section 3) ne peuvent plus finir ici — `makensis`
+  n'est pas installé et n'existe dans aucun dépôt de cette machine (Arch a
+  retiré le paquet `nsis`, Manjaro ne le propose pas) ; l'installation demande
+  root. Leurs preuves d'origine restent dans les commits des missions 14 et 21 ;
+  à rejouer sur une machine avec `nsis`.
+- **Demandé à qui** : à Gary, fournir `makensis` (paquet `nsis`) pour rejouer
+  m14 et m21 en entier.
