@@ -23,6 +23,20 @@ connectés compris, sans rien installer sur chaque appareil.
   `mediatek/filogic` (arm64) ; `.ipk` (et `.apk` si la version stable d'OpenWrt est passée
   au nouveau gestionnaire). Ajouté à la matrice CI et à la release.
 
+## INTERDIT : conteneur privilégié (incident du 24/11/2026)
+
+Le 24/11 à 01:08, `docker run --privileged openwrt/rootfs … /sbin/init` (conteneur
+`tordns-openwrt-test`) a fait redémarrer le PC de Gary : en mode privilégié, `procd` voit les
+périphériques de l'hôte, prend le **chien de garde matériel** (`/dev/watchdog`), coupe la session
+graphique, et la machine est réinitialisée une minute après l'arrêt du conteneur.
+- **Jamais `--privileged`**, jamais `--device`, jamais `/dev` monté, jamais `/sbin/init` d'OpenWrt
+  lancé directement dans Docker sur cette machine.
+- Le test système se fait dans **QEMU** (image `openwrt-*-x86-64-generic-ext4-combined.img`,
+  `qemu-system-x86_64 -nographic -m 256 -snapshot`, réseau utilisateur `-nic user`), ou dans un
+  conteneur NON privilégié qui lance seulement les binaires à tester (`dnsmasq`, `nft --check`,
+  le relais) sans init.
+- En cas de doute : écrire au journal « à confier à Claude » et ne pas lancer.
+
 ## Preuve (`scripts/verifier-m23.sh`)
 
 Binaires compilés pour chaque arch (vérifier avec `file`) ; paquet construit avec le SDK ;

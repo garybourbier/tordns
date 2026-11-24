@@ -27,13 +27,16 @@ Lire ce fichier en entier avant toute mission, puis la mission demandée, et rie
    `permissions:` minimales par job (`contents: read` par défaut), aucun
    `pull_request_target`, aucune entrée non fiable (`github.event.*.title`, `body`, nom de
    branche) interpolée dans un `run:`.
-5. **Zéro journal** des requêtes DNS, partout, toujours (inchangé).
-6. **Preuve exigée** : chaque mission finit par `scripts/verifier-mNN.sh` (sortie copiée
+5. **Jamais de conteneur privilégié** (`--privileged`, `--device`, `/dev` monté) ni d'init d'un
+   autre système dans Docker : le 24/11, l'init d'OpenWrt a pris le chien de garde matériel et
+   fait redémarrer le PC (voir mission 23). Les systèmes complets se testent dans QEMU.
+6. **Zéro journal** des requêtes DNS, partout, toujours (inchangé).
+7. **Preuve exigée** : chaque mission finit par `scripts/verifier-mNN.sh` (sortie copiée
    dans le dernier commit). Ce qui ne peut être prouvé qu'une fois sur GitHub (runner macOS,
    Windows ARM, Pages en ligne) est écrit « NON PROUVÉ — à vérifier au premier push ».
-7. Une mission = un sujet. Bloqué après trois essais : `docs/missions/journal.md`
+8. Une mission = un sujet. Bloqué après trois essais : `docs/missions/journal.md`
    (« à confier à Claude ») et continuer le reste.
-8. Français pour les commentaires, les commits, la doc et le site.
+9. Français pour les commentaires, les commits, la doc et le site.
 
 ## Matrice des plateformes visée
 
