@@ -1,0 +1,19 @@
+[Unit]
+Description=Docker (binaires statiques, image TorDNS)
+Documentation=https://docs.docker.com/engine/
+After=network-online.target containerd.service
+Wants=network-online.target
+Requires=containerd.service
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/dockerd --containerd=/run/containerd/containerd.sock
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

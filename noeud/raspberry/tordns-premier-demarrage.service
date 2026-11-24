@@ -1,0 +1,19 @@
+[Unit]
+Description=TorDNS — premier démarrage de la carte nœud
+Documentation=file:/opt/tordns/noeud/raspberry/README.md
+ConditionPathExists=!/var/lib/tordns/premier-demarrage.ok
+Wants=network-online.target tordns-etat-local.service docker.service
+After=network-online.target
+# Pas de After=docker.service : une panne de Docker ne doit pas retenir le
+# premier démarrage (le script attend Docker lui-même avant d'installer).
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=0
+ExecStart=/usr/local/lib/tordns/premier-demarrage.sh
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

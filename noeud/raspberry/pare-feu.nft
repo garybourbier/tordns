@@ -1,0 +1,35 @@
+#!/usr/sbin/nft -f
+# TorDNS — pare-feu de la carte nœud (Mission 24).
+#
+# Rien n'entre par défaut. Seule la page d'état écoute, et seulement depuis les
+# plages privées : le nœud n'est pas un service public, son unique entrée est
+# le service caché Tor (sortant, donc couvert par ct state established).
+# SSH n'est pas ouvert : la carte se gère sur le LAN (page d'état) ou au clavier.
+flush ruleset
+
+table inet tordns {
+	set lan {
+		type ipv4_addr
+		flags interval
+		elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }
+	}
+
+	chain entree {
+		type filter hook input priority filter; policy drop;
+
+		iif lo accept
+		ct state established,related accept
+		ct state invalid drop
+
+		# DHCP et mDNS (avahi publie tordns.local).
+		udp sport 67 udp dport 68 accept
+		udp dport 5353 accept
+
+		# Page d'état, LAN uniquement.
+		ip saddr @lan tcp dport 80 accept
+	}
+
+	chain sortie {
+		type filter hook output priority filter; policy accept;
+	}
+}
