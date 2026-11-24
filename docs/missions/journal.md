@@ -489,3 +489,49 @@ Une entrée par mission : fait, reste, demandé à qui.
   mediatek/filogic) et confirmer RAM, Tor et anti-fuite en conditions réelles ;
   à Claude, relire le service procd (restauration des serveurs dnsmasq à
   l'arrêt) et le template nftables.
+
+## Mission 27 — Dossier pour un audit de sécurité externe (24/11/2026)
+
+- **Fait** : `docs/securite/modele-de-menace.md` (4 actifs, 7 adversaires,
+  chaque défense renvoyant au fichier qui l'implémente et au vérificateur qui
+  la teste, hors périmètre explicite) ; `docs/securite/perimetre-audit.md`
+  (tableau des composants, environnement de test hors ligne, hors périmètre,
+  8 questions précises à l'auditeur, priorité suggérée) ;
+  `docs/securite/problemes-connus.md` (tout le NON PROUVÉ du journal, classé
+  par gravité, chaque élément renvoyant à une mission) ;
+  `docs/securite/demande-otf.md` (brouillon en anglais, à relire et envoyer
+  par Gary) ; `SECURITY.md` complété (versions prises en charge, délais
+  d'accusé, d'évaluation et de divulgation coordonnée à 90 jours, renvoi au
+  dossier). Aucun contact ni envoi n'a été fait.
+- **Preuve** `scripts/verifier-m27.sh` : les cinq documents existent et ont
+  leurs sections ; les 84 chemins cités existent ; chaque problème connu
+  renvoie à une mission présente au journal (17 missions citées) ; aucune clé,
+  aucune adresse `.onion` complète, aucun courriel ; lint vert.
+- **Reste / non prouvé** : l'audit lui-même, l'acceptation par un auditeur ou
+  par l'OTF, et la pertinence des questions posées (à valider par un tiers).
+  Le commit à auditer reste à figer au moment de la demande.
+- **Demandé à qui** : à Gary, relire `demande-otf.md`, y mettre la date et le
+  commit, puis déposer lui-même la demande ; à Claude, relire le modèle de
+  menace et le classement des problèmes connus.
+
+## Missions 24 à 26 — non faites (24/11/2026)
+
+- **État** : arrêtées avant tout code, faute de moyens sur cette machine.
+- **Mission 24 — image Raspberry Pi** : la construction impose d'éditer une
+  image disque hors ligne (montage en boucle, `systemd-nspawn`, ou au minimum
+  `root` pour écrire dans la partition ext4) ; cette machine n'a pas de `sudo`
+  sans mot de passe et pas de QEMU hôte. Une voie sans privilèges existe
+  (`debugfs` + `proot` + `qemu-user-static` dans un conteneur non privilégié,
+  `mtools` pour la partition de démarrage), mais elle demande plusieurs heures
+  de mise au point et le téléchargement de Raspberry Pi OS Lite (≈ 500 Mo),
+  que la session n'a pas couverts. Rien n'a été laissé à moitié construit :
+  aucun fichier de `noeud/raspberry/` ni de `scripts/ci/image-rpi.sh` n'existe.
+- **Mission 25 — F-Droid** : demande `fdroidserver` officiel, NDK Android,
+  récupération Maven vérifiée à la place de `client-android/libs/`, un build
+  Gradle parallèle et un `fdroid build` complet ; non commencée.
+- **Mission 26 — client iOS** : demande une chaîne Apple (`xcodegen`, Xcode,
+  `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie
+  Rust partagée serait testable ici. Non commencée.
+- **À confier à Claude** : reprendre les missions 24, 25 et 26 dans cet ordre,
+  avec une machine disposant de `root` (ou d'un conteneur capable d'écrire une
+  image disque) pour la 24, et d'un runner macOS pour la 26.
