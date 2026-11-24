@@ -148,6 +148,7 @@ func registreDeTest(t *testing.T) (*registre, string, string) {
 	dir := t.TempDir()
 	reference := nouveauFauxReference(t)
 	cfg := config{
+		AdressesLocales:     true,
 		Quarantaine:         time.Nanosecond,
 		SondesMin:           1,
 		EchecsMax:           1,
@@ -495,5 +496,45 @@ func TestEtatPublicSansContactNiDefi(t *testing.T) {
 	r.mu.Unlock()
 	if garde != "benevole@exemple.invalid" {
 		t.Fatalf("contact perdu dans l'état interne : %q", garde)
+	}
+}
+
+// Relecture du 24/11, point 5a : rappeler confirmer ne doit jamais remettre à zéro
+// le compte à rebours de la quarantaine (ici une vraie durée, pas une nanoseconde).
+func TestConfirmerRejoueNeRepoussePasLaQuarantaine(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	horloge := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	r.cfg.Maintenant = func() time.Time { return horloge }
+	r.cfg.Quarantaine = 72 * time.Hour
+	n := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n)
+	debut := r.etat.Candidats[n.adresse()].Depuis
+	horloge = horloge.Add(48 * time.Hour)
+	if _, err := r.confirmer(n.adresse()); err != nil {
+		t.Fatalf("seconde confirmation : %v", err)
+	}
+	if got := r.etat.Candidats[n.adresse()].Depuis; !got.Equal(debut) {
+		t.Fatalf("Depuis remis à %v (attendu %v) : admission repoussée par un tiers", got, debut)
+	}
+	if r.etat.Candidats[n.adresse()].Defi != "" {
+		t.Fatal("défi conservé après confirmation")
+	}
+}
+
+// Point 5b-c : une seule grammaire, et une seule écriture par cible.
+func TestNormalisationAdresses(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	onion := strings.Repeat("a", 56) + ".onion"
+	if a, ok := r.normaliser("  " + strings.ToUpper(onion) + " "); !ok || a != onion {
+		t.Fatalf("onion non normalisée : %q %v", a, ok)
+	}
+	if a, ok := r.normaliser("localhost:080"); !ok || a != "127.0.0.1:80" {
+		t.Fatalf("adresse locale non canonique : %q %v", a, ok)
+	}
+	r.cfg.AdressesLocales = false
+	for _, mauvaise := range []string{"127.0.0.1:80", "10.0.0.1:80", "exemple.test:80", onion + ":80"} {
+		if _, ok := r.normaliser(mauvaise); ok {
+			t.Fatalf("%q accepté hors des bancs de test", mauvaise)
+		}
 	}
 }

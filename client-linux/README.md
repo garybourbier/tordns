@@ -194,7 +194,8 @@ TORDNS_MAJ_BINAIRE=/usr/local/bin/tordns-client
 ## DNSSEC et adresses signées (Mission 12)
 
 Le client valide désormais DNSSEC lui-même avec `github.com/miekg/dns` : il
-part de la clé racine IANA (20326), construit la chaîne DS/DNSKEY jusqu'à la
+part des clés racine publiées par l'IANA (20326 et 38696, KSK-2024 qui signe la
+racine depuis le 11/10/2026), construit la chaîne DS/DNSKEY jusqu'à la
 zone de la question et vérifie les `RRSIG` de la réponse. Une signature fausse
 ou une chaîne rompue donne `SERVFAIL` ; la réponse du nœud n'est jamais
 relayée. Trois modes :

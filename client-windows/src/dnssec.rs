@@ -15,7 +15,7 @@ use std::sync::Arc;
 use futures::stream::{self, Stream};
 use hickory_proto::error::ProtoError;
 use hickory_proto::op::Message;
-use hickory_proto::rr::dnssec::TrustAnchor;
+use hickory_proto::rr::dnssec::{Algorithm, PublicKeyEnum, TrustAnchor};
 use hickory_proto::xfer::{DnsHandle, DnsRequest, DnsResponse, DnssecDnsHandle};
 
 use crate::doh::ClientDoh;
@@ -48,9 +48,10 @@ impl DnsHandle for DoHHandle {
     }
 }
 
-/// Valide `requete` et retourne la réponse authentifiée, ré-encodée. Une zone
-/// non signée est acceptée par hickory (délégation non signée), comme sur
-/// Internet ; seule une signature fausse ou une chaîne rompue est refusée.
+/// Valide `requete` et retourne la réponse authentifiée, ré-encodée depuis le
+/// message validé. ATTENTION : hickory 0.24 n'a aucune notion de délégation non
+/// signée ; une zone non signée finit en erreur, donc en SERVFAIL (relecture du
+/// 24/11, point 4d — à traiter, voir docs/missions).
 pub fn resoudre(doh: &ClientDoh, requete: &[u8]) -> Result<Vec<u8>, String> {
     let message = Message::from_vec(requete).map_err(|e| e.to_string())?;
     valider(
@@ -58,20 +59,113 @@ pub fn resoudre(doh: &ClientDoh, requete: &[u8]) -> Result<Vec<u8>, String> {
             doh: Arc::new(doh.clone()),
         },
         message,
-        TrustAnchor::default(),
+        ancres_racine(),
     )
+}
+
+/// Clé publique de KSK-2024 (key tag 38696), au format DNSKEY brut (RFC 3110).
+/// Son empreinte SHA-256 a été recalculée et comparée à celle de l'IANA
+/// (683D2D0A…FB2B16, data.iana.org/root-anchors/root-anchors.xml) le 24/11/2026.
+const KSK_2024: &[u8] = include_bytes!("ancres/38696.rsa");
+
+/// Les ancres de la racine : celles de hickory 0.24 (19036, 20326) PLUS KSK-2024.
+/// La racine n'est plus signée que par 38696 depuis le 11/10/2026 : sans elle, plus
+/// rien ne validait (relecture du 24/11, point 1, même défaut que le client Linux).
+/// KSK-2017 (20326) est révoquée le 11/01/2027 ; surveiller le prochain roulement.
+fn ancres_racine() -> TrustAnchor {
+    let mut ancre = TrustAnchor::default();
+    if let Ok(cle) = PublicKeyEnum::from_public_bytes(KSK_2024, Algorithm::RSASHA256) {
+        ancre.insert_trust_anchor(&cle);
+    }
+    ancre
 }
 
 fn valider<H>(handle: H, message: Message, ancre: TrustAnchor) -> Result<Vec<u8>, String>
 where
     H: DnsHandle<Error = ProtoError> + 'static,
 {
+    let question = message
+        .queries()
+        .first()
+        .cloned()
+        .ok_or_else(|| "requête sans question".to_string())?;
     let nœud = DnssecDnsHandle::with_trust_anchor(handle, ancre);
     let mut flux = nœud.send(DnsRequest::from(message));
     let reponse = futures::executor::block_on(futures::StreamExt::next(&mut flux))
         .ok_or_else(|| "validation DNSSEC sans réponse".to_string())?
         .map_err(|e| format!("validation DNSSEC : {e}"))?;
-    Ok(reponse.into_buffer())
+    // Le message brut, tel que le nœud l'a envoyé : on y lit les RRSIG pour les
+    // contrôles que la bibliothèque ne fait pas (voir `controler`).
+    let brut = Message::from_vec(reponse.as_buffer()).map_err(|e| e.to_string())?;
+    // LE MESSAGE VALIDÉ, JAMAIS LE BUFFER. hickory retire du message les RRset qui
+    // n'ont pas vérifié mais garde le buffer d'origine intact : `into_buffer()`
+    // relayait donc la réponse du nœud sans filtrage (relecture du 24/11, point 4a).
+    let valide = reponse.into_message();
+    controler(&question, &valide, &brut, maintenant_unix())?;
+    valide.to_vec().map_err(|e| e.to_string())
+}
+
+/// Tolérance d'horloge sur la validité des signatures : un poste peut dériver,
+/// mais une tolérance large rouvrirait le rejeu de chaînes archivées.
+const DERIVE_HORLOGE_S: i64 = 300;
+
+fn maintenant_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Les contrôles que `hickory-proto` 0.24 ne fait pas, et sans lesquels « validé »
+/// ne veut rien dire (relecture du 24/11, points 4a, 4b, 4c) :
+/// - le message validé répond encore à la question (sinon le filtrage a tout
+///   retiré : une réponse creuse n'est pas une réponse) ;
+/// - TOUTE signature qui couvre un enregistrement retenu a été faite par la zone
+///   de cet enregistrement ou par un de ses ancêtres (comparaison de labels) :
+///   sans ce contrôle, le titulaire de n'importe quel domaine signé pouvait
+///   « valider » une réponse pour n'importe quel nom ;
+/// - et elle est dans sa période de validité, à la dérive d'horloge près.
+/// Toutes les signatures, pas une : on ne sait pas laquelle hickory a retenue, et
+/// exiger qu'elles passent toutes ne peut pas affaiblir la validation.
+fn controler(
+    question: &hickory_proto::op::Query,
+    valide: &Message,
+    brut: &Message,
+    maintenant: i64,
+) -> Result<(), String> {
+    use hickory_proto::op::ResponseCode;
+    use hickory_proto::rr::RecordType;
+    if valide.response_code() == ResponseCode::NoError {
+        let repond = valide.answers().iter().any(|r| {
+            r.name().eq_case(question.name()) || r.name() == question.name()
+        } && (r.record_type() == question.query_type() || r.record_type() == RecordType::CNAME));
+        if !repond {
+            return Err("réponse validée vide pour la question posée".into());
+        }
+    }
+    for r in valide.answers().iter().chain(valide.name_servers()) {
+        if r.record_type() == RecordType::RRSIG {
+            continue;
+        }
+        for sig in brut
+            .answers()
+            .iter()
+            .chain(brut.name_servers())
+            .filter(|s| s.name() == r.name())
+            .filter_map(|s| s.data().and_then(|d| d.as_dnssec()).and_then(|d| d.as_rrsig()))
+            .filter(|s| s.type_covered() == r.record_type())
+        {
+            if !sig.signer_name().zone_of(r.name()) {
+                return Err("signature faite hors de la zone du nom signé".into());
+            }
+            let debut = sig.sig_inception() as i64;
+            let fin = sig.sig_expiration() as i64;
+            if maintenant + DERIVE_HORLOGE_S < debut || maintenant - DERIVE_HORLOGE_S > fin {
+                return Err("signature hors de sa période de validité".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -90,15 +184,28 @@ mod tests {
     }
 
     fn record_signe(nom: &Name, rrset: Vec<Record>, signer: &SigSigner) -> Record {
+        record_signe_par(nom, nom, rrset, signer, maintenant() - 60, maintenant() + 3600)
+    }
+
+    /// Signe `rrset` (au nom `nom`) avec la clé de `signer`, en annonçant
+    /// `signataire` comme nom de signataire et la période donnée.
+    fn record_signe_par(
+        nom: &Name,
+        signataire: &Name,
+        rrset: Vec<Record>,
+        signer: &SigSigner,
+        debut: u32,
+        fin: u32,
+    ) -> Record {
         let rrsig = RRSIG::new(
             rrset[0].record_type(),
             Algorithm::ED25519,
             nom.num_labels(),
             rrset[0].ttl(),
-            maintenant() + 3600,
-            maintenant() - 60,
+            fin,
+            debut,
             signer.calculate_key_tag().unwrap(),
-            nom.clone(),
+            signataire.clone(),
             vec![],
         );
         let sig: Record<RRSIG> = Record::from_rdata(nom.clone(), rrset[0].ttl(), rrsig.clone());
@@ -109,10 +216,10 @@ mod tests {
             Algorithm::ED25519,
             nom.num_labels(),
             rrset[0].ttl(),
-            maintenant() + 3600,
-            maintenant() - 60,
+            fin,
+            debut,
             signer.calculate_key_tag().unwrap(),
-            nom.clone(),
+            signataire.clone(),
             octets,
         );
         Record::from_rdata(
@@ -161,6 +268,11 @@ mod tests {
     }
 
     fn fixture() -> (FauxHandle, TrustAnchor) {
+        let (h, a, _) = fixture_complete();
+        (h, a)
+    }
+
+    fn fixture_complete() -> (FauxHandle, TrustAnchor, SigSigner) {
         let zone = Name::parse("example.test.", None).unwrap();
         let rng = ring::rand::SystemRandom::new();
         let graine = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
@@ -209,7 +321,93 @@ mod tests {
                 alterer: false,
             },
             ancre,
+            signer,
         )
+    }
+
+    fn a(nom: &Name, octet: u8) -> Record {
+        Record::from_rdata(
+            nom.clone(),
+            60,
+            RData::A(hickory_proto::rr::rdata::A::new(192, 0, 2, octet)),
+        )
+    }
+
+    fn question(nom: &Name) -> Message {
+        let mut q = Message::new();
+        q.add_query(hickory_proto::op::Query::query(nom.clone(), RecordType::A));
+        q
+    }
+
+    /// Relecture du 24/11, point 4a : une adresse forgée, sans signature, à laquelle
+    /// le nœud joint la DNSKEY d'ancrage (une constante publique). hickory accepte
+    /// un RRset fait uniquement de clés d'ancrage sans vérifier de signature, et
+    /// `into_buffer()` relayait alors l'adresse forgée.
+    #[test]
+    fn adresse_forgee_portee_par_la_cle_d_ancrage_refusee() {
+        let (mut h, ancre, _) = fixture_complete();
+        let mut forge = question(&h.zone);
+        forge.add_answer(a(&h.zone, 66));
+        forge.add_answer(Record::from_rdata(
+            h.zone.clone(),
+            3600,
+            RData::DNSSEC(DNSSECRData::DNSKEY(h.dnskey.clone())),
+        ));
+        h.dns_reponse = forge.to_vec().unwrap();
+        let r = valider(h.clone(), question(&h.zone), ancre);
+        assert!(r.is_err(), "adresse forgée relayée : {r:?}");
+    }
+
+    /// Point 4b : la zone example.test. signe une adresse pour victime.test. avec sa
+    /// propre clé, parfaitement valide. Le signataire n'est ni le nom signé ni un de
+    /// ses ancêtres : refus.
+    #[test]
+    fn signature_d_une_autre_zone_refusee() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let victime = Name::parse("victime.test.", None).unwrap();
+        let enr = a(&victime, 77);
+        let mut rep = question(&victime);
+        rep.add_answer(enr.clone());
+        rep.add_answer(record_signe_par(
+            &victime,
+            &h.zone,
+            vec![enr],
+            &signer,
+            maintenant() - 60,
+            maintenant() + 3600,
+        ));
+        h.dns_reponse = rep.to_vec().unwrap();
+        let r = valider(h, question(&victime), ancre);
+        assert!(r.is_err(), "signature hors zone acceptée : {r:?}");
+    }
+
+    /// Point 4c : une chaîne archivée, rejouée après l'expiration de sa signature.
+    #[test]
+    fn signature_perimee_refusee() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let enr = a(&h.zone, 1);
+        let mut rep = question(&h.zone);
+        rep.add_answer(enr.clone());
+        rep.add_answer(record_signe_par(
+            &h.zone,
+            &h.zone,
+            vec![enr],
+            &signer,
+            maintenant() - 20_000,
+            maintenant() - 10_000,
+        ));
+        h.dns_reponse = rep.to_vec().unwrap();
+        let r = valider(h.clone(), question(&h.zone), ancre);
+        assert!(r.is_err(), "signature périmée acceptée : {r:?}");
+    }
+
+    /// Le cas légitime reste accepté, ET c'est bien le message validé qui ressort.
+    #[test]
+    fn reponse_legitime_rendue_depuis_le_message_valide() {
+        let (h, ancre, _) = fixture_complete();
+        let rendu = valider(h.clone(), question(&h.zone), ancre).expect("réponse légitime refusée");
+        let m = Message::from_vec(&rendu).unwrap();
+        assert!(m.answers().iter().any(|r| r.record_type() == RecordType::A));
     }
 
     #[test]
@@ -223,5 +421,30 @@ mod tests {
         h.alterer = true;
         let q = Message::from_vec(&h.dns_reponse).unwrap();
         assert!(valider(h, q, ancre).is_err(), "adresse altérée acceptée");
+    }
+}
+
+#[cfg(test)]
+mod tests_ancres {
+    use super::*;
+    use hickory_proto::rr::dnssec::rdata::DNSKEY;
+
+    /// KSK-2024 est bien livrée, et son empreinte est celle publiée par l'IANA.
+    #[test]
+    fn ksk_2024_livree_et_conforme_a_l_iana() {
+        let cle = PublicKeyEnum::from_public_bytes(KSK_2024, Algorithm::RSASHA256)
+            .expect("clé KSK-2024 illisible");
+        assert!(ancres_racine().contains(&cle));
+        let dnskey = DNSKEY::new(true, true, false, Algorithm::RSASHA256, KSK_2024.to_vec());
+        let racine = hickory_proto::rr::Name::root();
+        assert_eq!(dnskey.calculate_key_tag().unwrap(), 38696);
+        let empreinte = dnskey
+            .to_digest(&racine, hickory_proto::rr::dnssec::DigestType::SHA256)
+            .unwrap();
+        let hex: String = empreinte.as_ref().iter().map(|b| format!("{b:02X}")).collect();
+        assert_eq!(
+            hex,
+            "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+        );
     }
 }

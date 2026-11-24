@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +33,19 @@ var (
 	errMensonge     = errors.New("réponse DNSSEC ou justesse incorrecte")
 	errIndisponible = errors.New("nœud indisponible")
 	reAdresse       = regexp.MustCompile(`^([a-z2-7]{56}\.onion|[a-zA-Z0-9.-]+:[0-9]{1,5})$`)
+	// UNE SEULE GRAMMAIRE pour une adresse d'instance : un service caché v3. L'ancienne
+	// grammaire acceptait aussi « hôte:port », d'où deux écritures d'une même cible
+	// (contournement de la liste des évincés) et un contrôleur qui allait chercher
+	// n'importe quelle adresse nommée par l'appelant (relecture du 24/11, point 5b-c).
+	reOnion = regexp.MustCompile(`^[a-z2-7]{56}\.onion$`)
+	// Les bancs de test seulement (config.AdressesLocales) : la boucle locale.
+	reLocale = regexp.MustCompile(`^(127\.0\.0\.1|localhost):([0-9]{1,5})$`)
 )
 
 type config struct {
+	// AdressesLocales accepte « 127.0.0.1:port » en plus des .onion : bancs de
+	// test uniquement, jamais en service.
+	AdressesLocales      bool
 	Quarantaine          time.Duration
 	EchecsMax            int
 	DoutesMax            int
@@ -238,8 +249,8 @@ func (r *registre) verifierDefi(adresse, defi string) error {
 func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	adresse = strings.TrimSpace(adresse)
-	if !reAdresse.MatchString(adresse) {
+	adresse, ok := r.normaliser(adresse)
+	if !ok {
 		return candidat{}, errors.New("adresse d'instance invalide")
 	}
 	maintenant := r.cfg.Maintenant()
@@ -280,11 +291,24 @@ func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 
 // confirmer vérifie que le nœud sert maintenant le défi qui lui a été remis.
 func (r *registre) confirmer(adresse string) (candidat, error) {
+	adresse, valide := r.normaliser(adresse)
+	if !valide {
+		return candidat{}, errors.New("inscription inconnue")
+	}
 	r.mu.Lock()
-	c, ok := r.etat.Candidats[strings.TrimSpace(adresse)]
+	c, ok := r.etat.Candidats[adresse]
 	if !ok {
 		r.mu.Unlock()
 		return candidat{}, errors.New("inscription inconnue")
+	}
+	// CONFIRMATION À UN COUP. Une fois confirmé, rien ne se rejoue : ni requête
+	// vers le nœud, ni écriture. Avant, n'importe qui lisant l'adresse publique
+	// pouvait rappeler confirmer et remettre `Depuis` à maintenant, donc repousser
+	// indéfiniment l'admission d'un bénévole honnête (relecture du 24/11, point 5a).
+	if c.Confirme {
+		copie := *c
+		r.mu.Unlock()
+		return copie, nil
 	}
 	defi := c.Defi
 	r.mu.Unlock()
@@ -297,8 +321,13 @@ func (r *registre) confirmer(adresse string) (candidat, error) {
 	if !ok {
 		return candidat{}, errors.New("inscription inconnue")
 	}
-	c.Confirme = true
-	c.Depuis = r.cfg.Maintenant()
+	if !c.Confirme {
+		// `Depuis` est MONOTONE : écrit à la seule transition vers Confirme.
+		c.Confirme = true
+		c.Depuis = r.cfg.Maintenant()
+	}
+	// Le défi a servi : effacé, il ne prouve plus rien.
+	c.Defi = ""
 	if err := r.enregistrer(); err != nil {
 		return candidat{}, err
 	}
@@ -610,4 +639,23 @@ func (r *registre) instantane() etat {
 		copie.Evinces[k] = v
 	}
 	return copie
+}
+
+// normaliser rend la forme canonique d'une adresse d'instance, seule clé admise
+// pour lire ou écrire l'état (candidats, admis, évincés).
+func (r *registre) normaliser(adresse string) (string, bool) {
+	a := strings.ToLower(strings.TrimSpace(adresse))
+	if reOnion.MatchString(a) {
+		return a, true
+	}
+	if r.cfg.AdressesLocales {
+		if m := reLocale.FindStringSubmatch(a); m != nil {
+			port, err := strconv.Atoi(m[2])
+			if err != nil || port < 1 || port > 65535 {
+				return "", false
+			}
+			return "127.0.0.1:" + strconv.Itoa(port), true
+		}
+	}
+	return "", false
 }

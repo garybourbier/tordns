@@ -21,9 +21,17 @@ import (
 	"github.com/miekg/dns"
 )
 
-// Racine DNSSEC : clé 20326 (KSK 2017), algorithme 8, empreinte SHA-256.
-// Ce n'est pas un secret ; c'est l'ancre publique de l'IANA.
-const ancreRacineDS = "20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D"
+// Ancres de la racine DNSSEC, séparées par « ; », telles que publiées par l'IANA
+// (https://data.iana.org/root-anchors/root-anchors.xml, RFC 9718). Ce ne sont pas
+// des secrets.
+//
+// LES DEUX, PAS UNE. La racine est signée par KSK-2024 (38696) depuis le
+// 11/10/2026 ; KSK-2017 (20326) reste publiée, sera révoquée le 11/01/2027 et
+// retirée de la zone le 22/03/2027. Avec la seule 20326, plus rien ne résolvait
+// depuis le 11/10 (relecture du 24/11, point 1). La chaîne est acceptée si AU MOINS
+// UNE ancre la valide. Prochain roulement : surveiller data.iana.org/root-anchors/.
+const ancreRacineDS = "20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D;" +
+	"38696 8 2 683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
 
 // ErrZoneNonSignee indique une délégation sans DS (zone non signée). Le mode
 // auto l'accepte, le mode strict la refuse.
@@ -36,16 +44,28 @@ type validateurDNSSEC struct {
 	ancre      []*dns.DS
 }
 
-func nouveauValidateur(interroger func([]byte) ([]byte, error), ancre string) (*validateurDNSSEC, error) {
-	rr, err := dns.NewRR(". IN DS " + ancre)
-	if err != nil {
-		return nil, fmt.Errorf("ancre DNSSEC invalide : %w", err)
+// nouveauValidateur accepte une ou plusieurs ancres DS séparées par « ; ».
+func nouveauValidateur(interroger func([]byte) ([]byte, error), ancres string) (*validateurDNSSEC, error) {
+	var liste []*dns.DS
+	for _, ancre := range strings.Split(ancres, ";") {
+		ancre = strings.TrimSpace(ancre)
+		if ancre == "" {
+			continue
+		}
+		rr, err := dns.NewRR(". IN DS " + ancre)
+		if err != nil {
+			return nil, fmt.Errorf("ancre DNSSEC invalide : %w", err)
+		}
+		ds, ok := rr.(*dns.DS)
+		if !ok {
+			return nil, errors.New("ancre DNSSEC : enregistrement DS attendu")
+		}
+		liste = append(liste, ds)
 	}
-	ds, ok := rr.(*dns.DS)
-	if !ok {
-		return nil, errors.New("ancre DNSSEC : enregistrement DS attendu")
+	if len(liste) == 0 {
+		return nil, errors.New("aucune ancre DNSSEC")
 	}
-	return &validateurDNSSEC{interroger: interroger, ancre: []*dns.DS{ds}}, nil
+	return &validateurDNSSEC{interroger: interroger, ancre: liste}, nil
 }
 
 // Valider vérifie la réponse complète. Retourne ErrZoneNonSignee si la chaîne
@@ -267,11 +287,12 @@ func (v *validateurDNSSEC) dsDe(nom, zoneParent string, clesParent []*dns.DNSKEY
 
 	insecure, err := v.preuveAbsence(canon(zoneParent), clesParent, nom, dns.TypeDS, &m)
 	if err != nil {
-		// Un renvoi (NS sans SOA) signale une délégation non signée dont le
-		// parent ne peut pas fournir de preuve DNSSEC.
-		if referenceSansSOA(&m) {
-			return nil, ErrZoneNonSignee
-		}
+		// AUCUNE porte de sortie ici. Un parent signé peut TOUJOURS prouver
+		// l'absence de DS par NSEC ou NSEC3, opt-out compris (RFC 4035 §3.1.4.1,
+		// RFC 5155) ; un parent non signé a déjà rendu la chaîne « insecure » plus
+		// haut. L'ancienne exception « renvoi NS sans SOA » était un test de forme
+		// sur un message que le nœud forge à volonté : elle lui permettait de
+		// désactiver DNSSEC pour n'importe quelle zone (relecture du 24/11, point 2).
 		return nil, fmt.Errorf("absence de DS pour %s : %w", nom, err)
 	}
 	if insecure {
@@ -710,19 +731,6 @@ func rrset(rrs []dns.RR, nom string, typ uint16) []dns.RR {
 
 func canon(nom string) string {
 	return strings.ToLower(dns.Fqdn(nom))
-}
-
-func referenceSansSOA(m *dns.Msg) bool {
-	var ns, soa bool
-	for _, rr := range m.Ns {
-		switch rr.(type) {
-		case *dns.NS:
-			ns = true
-		case *dns.SOA:
-			soa = true
-		}
-	}
-	return ns && !soa
 }
 
 func requete(nom string, typ uint16) []byte {

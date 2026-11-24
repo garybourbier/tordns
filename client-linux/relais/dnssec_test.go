@@ -91,7 +91,11 @@ type fauxResolveur struct {
 	altererA             bool
 	injecterA            bool
 	sansDS               bool
-	mode                 string
+	// renvoiForge : le nœud répond à la question DS de example.test. par un
+	// renvoi NS sans SOA ni NSEC ni signature, puis sert une adresse non signée
+	// (relecture du 24/11, point 2 : il désactivait ainsi DNSSEC pour la zone).
+	renvoiForge bool
+	mode        string
 	// signatureA, si non nil, remplace la signature de l'enregistrement A
 	// (attaques : signature périmée, signataire voisin).
 	signatureA func(rrset []dns.RR) *dns.RRSIG
@@ -125,6 +129,13 @@ func (f *fauxResolveur) interroger(brut []byte) ([]byte, error) {
 			return f.reponseZone(rep, question, f.racine, f.tld)
 		}
 	case "example.test.":
+		if question.Qtype == dns.TypeDS && f.renvoiForge {
+			rep.Ns = append(rep.Ns, &dns.NS{
+				Hdr: dns.RR_Header{Name: "example.test.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+				Ns:  "ns.attaquant.invalid.",
+			})
+			return rep.Pack()
+		}
 		if question.Qtype == dns.TypeDS && f.sansDS {
 			n := nsec("example.test.", "zzz.test.", dns.TypeNS, dns.TypeNSEC, dns.TypeRRSIG)
 			rep.Ns = append(rep.Ns, n, signer(f.tld, []dns.RR{n}))
@@ -180,7 +191,7 @@ func (f *fauxResolveur) interroger(brut []byte) ([]byte, error) {
 	rrset := []dns.RR{a}
 	if f.signatureA != nil {
 		rep.Answer = append(rrset, f.signatureA(rrset))
-	} else if !f.sansDS && !strings.HasSuffix(nom, ".unsigned.example.test.") {
+	} else if !f.sansDS && !f.renvoiForge && !strings.HasSuffix(nom, ".unsigned.example.test.") {
 		rep.Answer = append(rrset, signer(f.exemple, rrset))
 	} else {
 		rep.Answer = append(rep.Answer, a)
@@ -469,5 +480,57 @@ func TestDNSSECSignataireVoisinRefuse(t *testing.T) {
 	}
 	if err := validerReponse(t, f, "www.example.test"); err != nil {
 		t.Fatalf("sous-domaine légitime refusé : %v", err)
+	}
+}
+
+// Relecture du 24/11, point 2 : un renvoi forgé (NS sans SOA, aucune preuve
+// NSEC/NSEC3, aucune signature) ne doit JAMAIS faire passer une zone signée pour
+// non signée. Le mode auto accepterait sinon l'adresse sans validation.
+func TestDNSSECRenvoiForgeSansPreuveRefuse(t *testing.T) {
+	f, _ := chaineDeTest(t)
+	f.renvoiForge = true
+	err := validerReponse(t, f, "example.test")
+	if err == nil || errors.Is(err, ErrZoneNonSignee) {
+		t.Fatalf("renvoi forgé accepté comme zone non signée : %v", err)
+	}
+}
+
+// Relecture du 24/11, point 1 : pendant un roulement de la KSK racine, plusieurs
+// ancres coexistent ; la chaîne est valide si AU MOINS UNE la valide.
+func TestDNSSECPlusieursAncresUneSuffit(t *testing.T) {
+	f, vraie := chaineDeTest(t)
+	autre := nouvelleZone(t, ".", 9)
+	fausse := dsDe(autre)
+	texte := fmt.Sprintf("%d %d %d %s; %s", fausse.KeyTag, fausse.Algorithm, fausse.DigestType, fausse.Digest, vraie)
+	v, err := nouveauValidateur(f.interroger, texte)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := f.interroger(requeteA("example.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Valider(rep); err != nil {
+		t.Fatalf("chaîne valide refusée avec deux ancres : %v", err)
+	}
+	// Et avec la seule ancre qui ne signe pas, refus.
+	seule := fmt.Sprintf("%d %d %d %s", fausse.KeyTag, fausse.Algorithm, fausse.DigestType, fausse.Digest)
+	v, err = nouveauValidateur(f.interroger, seule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Valider(rep); err == nil {
+		t.Fatal("chaîne acceptée par une ancre qui ne la signe pas")
+	}
+}
+
+// Les ancres livrées sont celles de l'IANA, KSK-2024 comprise.
+func TestDNSSECAncresLivrees(t *testing.T) {
+	if !strings.Contains(ancreRacineDS, "38696 8 2 683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16") {
+		t.Fatal("KSK-2024 (38696) absente des ancres livrées")
+	}
+	v, err := nouveauValidateur(func([]byte) ([]byte, error) { return nil, nil }, ancreRacineDS)
+	if err != nil || len(v.ancre) != 2 {
+		t.Fatalf("ancres livrées : %v, %d", err, len(v.ancre))
 	}
 }

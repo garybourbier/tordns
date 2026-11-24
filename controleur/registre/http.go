@@ -118,7 +118,9 @@ func (r *registre) posterConfirmation(w http.ResponseWriter, req *http.Request) 
 	}
 	c, err := r.confirmer(corps.Adresse)
 	if err != nil {
-		ecrireJSON(w, http.StatusUnprocessableEntity, map[string]string{"erreur": err.Error()})
+		// Un code FERMÉ : relayer err.Error() disait à l'appelant pourquoi la
+		// requête sortante avait échoué (relecture du 24/11, point 5c).
+		ecrireJSON(w, http.StatusUnprocessableEntity, map[string]string{"erreur": "confirmation refusée"})
 		return
 	}
 	ecrireJSON(w, http.StatusOK, reponseInscription{
