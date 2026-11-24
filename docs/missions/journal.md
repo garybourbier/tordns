@@ -588,10 +588,46 @@ Une entrée par mission : fait, reste, demandé à qui.
   que `UpdateCheckMode: Tags` attend ; à Claude, relire la recette et les
   métadonnées avant envoi.
 
-## Mission 26 — client iOS : non faite (24/11/2026)
+## Mission 26 — Client iOS (24/11/2026)
 
-- **État** : bloquée, pas commencée.
-- **Pourquoi** : demande une chaîne Apple (`xcodegen`, Xcode,
-  `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie Rust
-  partagée serait testable ici.
-- **À confier à Claude** : reprendre la mission 26 sur un runner macOS.
+- **Fait** : la logique Tor/DoH quitte `client-android/rust` pour un crate
+  partagé `outils/arti-rust` (`tordns-tor`) ; Android ne garde que le pont JNI,
+  iOS un pont C (`client-ios/rust`, ABI de `rust/include/tordns.h`). Livrés
+  aussi : application SwiftUI (marche/arrêt, adresses, DNSSEC, test de fuite,
+  empreinte mémoire), extension `NEPacketTunnelProvider` limitée au DNS,
+  `project.yml` pour `xcodegen` (trois cibles, aucun `.xcodeproj` versionné),
+  entitements `packet-tunnel-provider` et groupe d'applications partagé,
+  tests de paquets DNS, `scripts/ci/client-ios.sh` et job CI `ios` sur
+  `macos-latest` (secrets Apple facultatifs, étape sautée sinon),
+  `scripts/verifier-m26.sh`.
+- **Choix** : `NEDNSProxyProvider` écarté. La documentation Apple (TN3134 et
+  la page du proxy DNS) le réserve aux appareils supervisés, avec un profil
+  `com.apple.dnsProxy.managed` installé par MDM depuis iOS 15 : une application
+  grand public ne pourrait pas l'activer. Le tunnel de paquets n'inclut aucune
+  route (`includedRoutes = []`), annonce un seul serveur DNS et n'attrape donc
+  que l'UDP/53 ; ce qui n'y passe pas par Tor est abandonné, jamais relayé en
+  clair. Le manifeste signé ne sert qu'à sa liste d'adresses : l'App Store est
+  le seul canal de mise à jour, aucune clé n'est sur l'appareil.
+- **Obstacle** : `cargo check --target aarch64-apple-ios` échoue ici — `ring`
+  compile du C et exige `xcrun` et le SDK iOS. La cible Rust s'installe, la
+  compilation non. Deux pièges du vérificateur, déjà connus de la mission 25 :
+  `cargo test | grep -q` tue cargo par SIGPIPE, et `nm | grep -q` fait de même ;
+  les deux sorties sont désormais capturées avant filtrage.
+- **Preuve** `scripts/verifier-m26.sh` : 6 tests du crate partagé et 6 du pont
+  C verts sur l'hôte ; 9 fonctions C déclarées dans l'en-tête, exportées et
+  liées dans `libtordns_ios.a` ; plists et entitements lus, tunnel de paquets
+  conforme, aucun `dns-proxy` ; `project.yml` en YAML valide dont le chemin
+  Rust correspond au script ; Swift n'appelle que l'ABI déclarée ; non-
+  régression Android (APK arm64 reconstruit, quatre symboles JNI exportés) ;
+  `actionlint` vert sur `ci.yml` ; aucune clé ni adresse `.onion` réelle.
+  `code=0`. `scripts/ci/lint.sh` et `scripts/verifier-m25.sh` rejoués verts
+  après le déplacement du crate.
+- **Non prouvé** : compilation Swift, projet `xcodegen`, extension et tests
+  simulateur (aucun macOS ici) ; archive signée, TestFlight et exécution du
+  job `ios` ; mémoire réelle d'Arti dans l'extension (limite iOS ≈ 50 Mo) et
+  éventuel déplacement d'Arti dans l'application ; activation du tunnel sur un
+  appareil réel ; sortie du DNS en TCP/53, non traitée.
+- **Demandé à qui** : à Claude, avec un Mac, lancer
+  `scripts/ci/client-ios.sh`, corriger ce que la compilation Swift révélera et
+  mesurer la mémoire de l'extension ; à Gary, l'équipe Apple, l'ouverture des
+  capacités Network Extensions et le choix de publier ou non sur l'App Store.
