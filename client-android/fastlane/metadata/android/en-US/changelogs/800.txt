@@ -1,0 +1,2 @@
+First version offered to F-Droid: DNS through Tor without root, local cache,
+DNSSEC validation and signature-verified updates.

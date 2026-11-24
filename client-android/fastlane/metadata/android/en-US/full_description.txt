@@ -1,0 +1,11 @@
+TorDNS resolves the device's DNS through Tor, with no root and no server to set up.
+
+The app opens a local VPN tunnel that captures only the device's DNS queries. They travel through Arti, the official Rust implementation of Tor, to the TorDNS .onion service, which answers from Unbound. Traffic from other apps leaves through the physical network as usual: only DNS is routed through Tor.
+
+• Nothing to install server-side: a .onion address is all it takes.
+• No query logs, neither on the phone nor on the service.
+• Bounded local cache to limit circuits, TTLs respected.
+• DNSSEC validation through dnsjava.
+• App updates verified by Ed25519 signature before installation.
+
+An advanced mode lets you choose the .onion address of the service used.
