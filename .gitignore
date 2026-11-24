@@ -24,3 +24,6 @@ controleur/pools/*.txt
 
 # Artefacts de compilation locaux et de CI
 dist/
+
+# Python (pilote QEMU)
+__pycache__/

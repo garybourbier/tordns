@@ -1,0 +1,16 @@
+{
+	"luci-app-tordns": {
+		"description": "Consulter et régler TorDNS sur le routeur",
+		"read": {
+			"uci": [ "tordns" ],
+			"file": {
+				"/usr/sbin/tordns-client": [ "exec" ],
+				"/usr/sbin/nft": [ "exec" ],
+				"/etc/init.d/tordns": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "tordns" ]
+		}
+	}
+}

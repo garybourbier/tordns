@@ -69,7 +69,8 @@ fi
 
 section "2. shellcheck"
 find "$RACINE" -type f -name '*.sh' \
-	-not -path '*/.git/*' -not -path '*/target/*' -not -path '*/build/*' -print0 |
+	-not -path '*/.git/*' -not -path '*/target/*' -not -path '*/build/*' \
+	-not -path '*/dist/*' -print0 |
 	sort -z | xargs -0 "$SHELLCHECK" -x
 
 section "3. gofmt et go vet"

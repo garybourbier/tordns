@@ -53,6 +53,20 @@
       "architecture": "armv7"
     },
     {
+      "cle": "openwrt-mipsel",
+      "nom": "tordns-{version}-r1-openwrt-mipsel_24kc.apk",
+      "source": "dist/client-openwrt/tordns-{version}-r1-mipsel_24kc.apk",
+      "plateforme": "OpenWrt",
+      "architecture": "ramips/mt7621 (mipsel_24kc)"
+    },
+    {
+      "cle": "openwrt-arm64",
+      "nom": "tordns-{version}-r1-openwrt-aarch64_cortex-a53.apk",
+      "source": "dist/client-openwrt/tordns-{version}-r1-aarch64_cortex-a53.apk",
+      "plateforme": "OpenWrt",
+      "architecture": "mediatek/filogic (aarch64_cortex-a53)"
+    },
+    {
       "cle": "linux-amd64-deb",
       "nom": "tordns-client-{version}-linux-amd64.deb",
       "source": "dist/client-linux/tordns-client_{version}_amd64.deb",

@@ -24,6 +24,8 @@ sont produits par `release.yml` et affichés par le site.
 | Linux | amd64 | [archive](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-amd64.tar.gz) · [.deb](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-amd64.deb) |
 | Linux | arm64 | [archive](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-arm64.tar.gz) · [.deb](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-arm64.deb) |
 | Linux | armv7 | [archive](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-linux-armv7.tar.gz) |
+| OpenWrt | ramips/mt7621 | [paquet apk](https://github.com/garybourbier/tordns/releases/latest/download/tordns-0.8.0-r1-openwrt-mipsel_24kc.apk) |
+| OpenWrt | mediatek/filogic | [paquet apk](https://github.com/garybourbier/tordns/releases/latest/download/tordns-0.8.0-r1-openwrt-aarch64_cortex-a53.apk) |
 | Android | universel | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-universel.apk) |
 | Android | arm64-v8a | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-arm64-v8a.apk) |
 | Android | armeabi-v7a | [APK](https://github.com/garybourbier/tordns/releases/latest/download/tordns-client-0.8.0-android-armeabi-v7a.apk) |
@@ -80,6 +82,22 @@ Détails : [client macOS](client-macos/README.md).
 3. Laisser « DNS privé » sur « Désactivé » pour éviter le DoT hors tunnel.
 
 Détails : [client Android](client-android/README.md).
+
+### OpenWrt (routeur)
+
+Sur un routeur OpenWrt 25.12 (≥ 256 Mo de RAM), le paquet protège tout le
+LAN : dnsmasq transfère vers le relais local et le pare-feu bloque le DNS
+direct et le DoT des appareils.
+
+```sh
+apk add --allow-untrusted ./tordns-0.8.0-r1-openwrt-mipsel_24kc.apk
+uci set tordns.main.onion='<adresse>.onion' && uci commit tordns
+/etc/init.d/tordns enable && /etc/init.d/tordns start
+```
+
+Choisir le paquet correspondant au routeur (`ramips/mt7621` en mipsel,
+`mediatek/filogic` en arm64). Détails, réglages UCI et anti-fuite :
+[paquet OpenWrt](client-openwrt/README.md).
 
 ## Héberger un nœud
 

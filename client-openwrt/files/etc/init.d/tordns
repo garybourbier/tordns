@@ -1,0 +1,128 @@
+#!/bin/sh /etc/rc.common
+# TorDNS — service OpenWrt (Mission 23).
+#
+# Le client écoute uniquement sur la boucle locale : dnsmasq est le seul
+# résolveur visible du LAN et transfère vers 127.0.0.1:5353. Le service ne
+# journalise aucun nom de domaine.
+
+START=95
+STOP=10
+USE_PROCD=1
+
+. /lib/functions.sh
+
+NOM=tordns
+CONF_NFT=/etc/nftables.d/10-tordns.nft
+TEMPLATE_NFT=/etc/tordns/anti-fuite.nft.template
+
+lire_config() {
+	config_load "$NOM"
+	config_get_bool ENABLED main enabled 1
+	config_get ONION main onion ""
+	config_get MODE main mode "coeur"
+	config_get DNSSEC main dnssec "auto"
+	config_get CACHE main cache "4096"
+	config_get SOCKS main socks "127.0.0.1:9050"
+	config_get PORT main port "5353"
+	config_get_bool DNSMASQ main dnsmasq 1
+	config_get_bool ANTI_FUITE main anti_fuite 1
+	config_get LAN_IFACE main lan_iface "br-lan"
+}
+
+# Retire nos propres transferts (127.0.0.1#port) de la liste UCI de dnsmasq
+# sans toucher aux serveurs ajoutés par l'utilisateur.
+retirer_serveurs() {
+	anciens=$(uci -q get dhcp.@dnsmasq[0].server)
+	uci -q delete dhcp.@dnsmasq[0].server
+	for serveur in $anciens; do
+		case "$serveur" in
+		127.0.0.1#*) ;;
+		*) uci -q add_list dhcp.@dnsmasq[0].server="$serveur" ;;
+		esac
+	done
+}
+
+# dnsmasq d'OpenWrt ignore /etc/dnsmasq.d : le transfert vers le relais passe
+# par l'UCI (noresolv + server), comme le recommande OpenWrt.
+configurer_dnsmasq() {
+	retirer_serveurs
+	if [ "$DNSMASQ" = 1 ]; then
+		uci -q set dhcp.@dnsmasq[0].noresolv='1'
+		uci -q add_list dhcp.@dnsmasq[0].server="127.0.0.1#${PORT}"
+	else
+		uci -q set dhcp.@dnsmasq[0].noresolv='0'
+	fi
+	uci -q commit dhcp
+	if [ -x /etc/init.d/dnsmasq ]; then
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+		# Le procd de dnsmasq rend la main avant que le processus écoute :
+		# on attend brièvement qu'il soit là.
+		i=0
+		while [ $i -lt 20 ] && ! pgrep dnsmasq >/dev/null 2>&1; do
+			sleep 1
+			i=$((i + 1))
+		done
+	fi
+}
+
+configurer_anti_fuite() {
+	mkdir -p /etc/nftables.d
+	case "$LAN_IFACE" in
+	"" | *[!A-Za-z0-9_.:-]*)
+		logger -t tordns "interface LAN invalide : $LAN_IFACE"
+		LAN_IFACE=br-lan
+		;;
+	esac
+	if [ "$ANTI_FUITE" = 1 ]; then
+		sed "s/@IFACE@/${LAN_IFACE}/g" "$TEMPLATE_NFT" >"$CONF_NFT"
+	else
+		rm -f "$CONF_NFT"
+	fi
+	[ -x /etc/init.d/firewall ] && /etc/init.d/firewall reload >/dev/null 2>&1 || true
+}
+
+start_service() {
+	lire_config
+	[ "$ENABLED" = 1 ] || return 0
+	if [ -z "$ONION" ]; then
+		logger -t tordns "adresse .onion absente : service non démarré"
+		return 1
+	fi
+	configurer_dnsmasq
+	configurer_anti_fuite
+
+	procd_open_instance
+	procd_set_param command /usr/sbin/tordns-client \
+		-ecoute "127.0.0.1:${PORT}" \
+		-onion "$ONION" \
+		-mode-adresse "$MODE" \
+		-dnssec "$DNSSEC" \
+		-cache "$CACHE" \
+		-socks "$SOCKS"
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param file /etc/config/tordns
+	procd_close_instance
+}
+
+stop_service() {
+	retirer_serveurs
+	uci -q set dhcp.@dnsmasq[0].noresolv='0'
+	uci -q commit dhcp
+	rm -f "$CONF_NFT"
+	if [ -x /etc/init.d/dnsmasq ]; then
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+		i=0
+		while [ $i -lt 20 ] && ! pgrep dnsmasq >/dev/null 2>&1; do
+			sleep 1
+			i=$((i + 1))
+		done
+	fi
+	[ -x /etc/init.d/firewall ] && /etc/init.d/firewall reload >/dev/null 2>&1 || true
+}
+
+reload_service() {
+	stop
+	start
+}

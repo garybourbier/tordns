@@ -1,0 +1,15 @@
+config tordns 'main'
+	option enabled '1'
+	# Adresse du service caché (cœur, secours ou communauté selon le mode).
+	option onion ''
+	option mode 'coeur'
+	option dnssec 'auto'
+	option cache '4096'
+	option socks '127.0.0.1:9050'
+	# dnsmasq transfère tout le LAN vers le relais sur cette boucle locale.
+	option port '5353'
+	# noresolv + server=127.0.0.1#5353 sont réglés dans l'UCI de dnsmasq.
+	option dnsmasq '1'
+	# Bloque le DNS direct hors routeur et le DoT (853) pour les clients du LAN.
+	option anti_fuite '1'
+	option lan_iface 'br-lan'

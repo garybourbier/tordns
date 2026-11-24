@@ -1,0 +1,17 @@
+# TorDNS — anti-fuite DNS/DoT pour les clients du LAN (Mission 23).
+# Ce fragment est inclus dans la table inet fw4 par fw4. @IFACE@ est remplacé
+# par l'interface LAN configurée dans /etc/config/tordns.
+chain tordns_anti_fuite {
+	type filter hook forward priority filter; policy accept;
+
+	# DNS en clair vers autre chose que le routeur : bloqué. dnsmasq reste
+	# joignable sur l'adresse locale du routeur (chaîne input).
+	iifname "@IFACE@" meta nfproto ipv4 udp dport 53 fib daddr type != local reject
+	iifname "@IFACE@" meta nfproto ipv4 tcp dport 53 fib daddr type != local reject
+	iifname "@IFACE@" meta nfproto ipv6 udp dport 53 fib daddr type != local reject
+	iifname "@IFACE@" meta nfproto ipv6 tcp dport 53 fib daddr type != local reject
+
+	# DNS over TLS : aucun client du LAN n'a besoin de sortir en 853.
+	iifname "@IFACE@" meta nfproto ipv4 tcp dport 853 reject
+	iifname "@IFACE@" meta nfproto ipv6 tcp dport 853 reject
+}
