@@ -30,7 +30,7 @@ Repo: https://github.com/garybourbier/tordns
 Builds:
   - versionName: '0.8.0'
     versionCode: 800
-    commit: '0000000000000000000000000000000000000000'
+    commit: 9b9eac970e8fa65aa3c58d049ab0fceb3d963c68
     ndk: r26b
     sudo:
       - apt-get update
