@@ -450,3 +450,42 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **Demandé à qui** : à Gary, définir les deux variables de dépôt et lancer le
   workflow Pages une fois avec Tor ; à Claude, relire la conservation des
   échantillons et l'interprétation des dates Onionbalance.
+
+## Mission 23 — Paquet OpenWrt (24/11/2026)
+
+- **Fait** : paquet `client-openwrt/` construit avec les SDK OpenWrt 25.12.6
+  épinglés par SHA-256 (ramips/mt7621, mediatek/filogic, x86/64), au format
+  `apk` de la version stable actuelle (plus d'`.ipk`). Binaires Go statiques
+  `-s -w` (sans UPX) pour mipsel_24kc, mips_24kc, arm_cortex-a7,
+  aarch64_cortex-a53 et x86_64, de 4,5 à 5,1 Mo. Service procd
+  (`START=95`, redémarrage automatique, rechargé si `/etc/config/tordns`
+  change), configuration UCI (adresse, mode, DNSSEC, cache, SOCKS, port,
+  dnsmasq, anti-fuite, interface LAN). Le transfert dnsmasq est réglé dans
+  l'UCI (`noresolv`, `server=127.0.0.1#5353`), pas dans `/etc/dnsmasq.d` que
+  dnsmasq d'OpenWrt ne lit pas ; les serveurs ajoutés par l'utilisateur sont
+  conservés et le service les rétablit à l'arrêt. Chaîne nftables
+  `tordns_anti_fuite` (hook forward) : rejet du port 53 hors du routeur et du
+  DoT 853 depuis le LAN, désactivable par l'option `anti_fuite`. Page LuCI
+  minimale (état, adresse, test de fuite, bouton démarrer/arrêter). Job
+  `openwrt` ajouté à la CI et à la release, entrées de téléchargement sur le
+  site et dans le README.
+- **Preuve** `scripts/verifier-m23.sh` : cinq binaires `file` statiques, trois
+  paquets `apk` construits par le SDK, contenu du paquet conforme, syntaxes
+  shell/JavaScript/JSON, puis image OpenWrt 25.12.6 x86_64 lancée dans QEMU
+  (`alpine` + `qemu-system-x86_64`, conteneur **non privilégié**, aucun
+  `/dev`, aucun init OpenWrt) : WAN, paquet installé, service actif, relais à
+  l'écoute sur 5353, dnsmasq transférant vers `127.0.0.1#5353`, chaîne
+  nftables présente, DNS direct et DoT bloqués depuis un client du LAN
+  simulé, témoin anti-fuite désactivée autorisant puis réactivée bloquant,
+  transfert prouvé par un stub DNS répondant `93.184.216.34`, et aucun nom de
+  domaine dans `logread` ni dans la sortie du service. `scripts/ci/lint.sh`
+  vert.
+- **Reste / non prouvé** : vrai routeur matériel (flash, RAM réelle, Tor qui
+  tient dans 256 Mo), Tor et résolution par le `.onion` sur le routeur, paquets
+  installés sur mips/arm (seuls les binaires y sont vérifiés), page LuCI
+  construite et affichée, rendu nftables sur mips/arm, exécution des workflows
+  CI/release. Les essais système n'utilisent aucune adresse réelle.
+- **Demandé à qui** : à Gary, flasher un routeur (ramips/mt7621 ou
+  mediatek/filogic) et confirmer RAM, Tor et anti-fuite en conditions réelles ;
+  à Claude, relire le service procd (restauration des serveurs dnsmasq à
+  l'arrêt) et le template nftables.
