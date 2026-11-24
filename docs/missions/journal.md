@@ -550,14 +550,48 @@ Une entrée par mission : fait, reste, demandé à qui.
   du premier démarrage ; à Claude, relire `premier-demarrage.sh` et le
   durcissement des unités systemd.
 
-## Missions 25 et 26 — non faites (24/11/2026)
+## Mission 25 — Publication sur F-Droid (24/11/2026)
 
-- **État** : arrêtées avant tout code, faute de moyens sur cette machine.
-- **Mission 25 — F-Droid** : demande `fdroidserver` officiel, NDK Android,
-  récupération Maven vérifiée à la place de `client-android/libs/`, un build
-  Gradle parallèle et un `fdroid build` complet ; non commencée.
-- **Mission 26 — client iOS** : demande une chaîne Apple (`xcodegen`, Xcode,
-  `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie
-  Rust partagée serait testable ici. Non commencée.
-- **À confier à Claude** : reprendre les missions 25 puis 26, avec `fdroidserver`
-  et le NDK Android pour la 25, et un runner macOS pour la 26.
+- **Fait** : `metadata/org.tordns.client.yml` (MIT, NDK `r26b`, Rust par
+  `sudo`/`prebuild`, construction confiée à `client-android/scripts/construire.sh`,
+  `commit:` sur le SHA de la mission, AutoUpdateMode `Version`, UpdateCheckMode
+  `Tags`), métadonnées fastlane fr-FR et en-US (titre, résumés, description,
+  journal `800`), `docs/fdroid.md` (procédure de soumission à la main, c'est
+  Gary qui ouvre la demande), `client-android/DEPENDANCES.md` (licences et
+  empreintes), `scripts/verifier-m25.sh`.
+- **Choix** : pas de Gradle. F-Droid accepte des commandes `build:`
+  arbitraires, donc la recette appelle le script maison ; il a fallu y dériver
+  la version du tag (`scripts/ci/version.sh`) et écrire le manifeste dans une
+  copie temporaire, `aapt2` 2.20 ignorant `--version-code`/`--version-name`
+  quand le manifeste les déclare.
+- **Obstacle** : `fdroid build` refuse les `.jar` versionnés (« Found Fichier
+  Java JAR »). `client-android/libs/` disparaît au profit de
+  `client-android/scripts/telecharger-libs.sh`, qui récupère dnsjava 3.6.3 et
+  slf4j-api 2.0.16 sur Maven Central avec empreintes SHA-256 épinglées dans
+  `client-android/build/libs/` (cache local, remplacement d'un jar corrompu
+  vérifié).
+- **Seconde obstruction** : l'APK portait `debuggable` (option `--debug-mode`
+  d'`aapt2 link`), refusé par F-Droid. La construction de publication ne
+  l'active plus ; `DEBUG=oui` la remet pour le diagnostic adb documenté.
+- **Preuve** `scripts/verifier-m25.sh` : `fdroid lint` officiel sans remarque ;
+  `fdroid build --test` officiel (fdroidserver 2.4.2 sous Python 3.14) sur un
+  dépôt servi en HTTP local, produisant `0.8.0 (800)` avec trois ABI, dnsjava
+  et `TorVpnService` dans le dex ; `fdroid scanner` sans classe non libre ;
+  aucune archive Java dans les sources. `code=0`.
+- **Non prouvé** : l'acceptation par F-Droid et la construction dans leur
+  buildserver (ni libvirt ni leur image ici) ; `sudo`/`prebuild` de la recette
+  sont retirés localement puisque Rust, le SDK et le NDK sont déjà installés ;
+  aucune capture d'écran fastlane (pas d'appareil) ; la comparaison
+  reproductible avec l'APK signé par Gary n'est pas faite.
+- **Demandé à qui** : à Gary, ouvrir la demande sur fdroiddata (MR avec
+  `metadata/org.tordns.client.yml` et `fastlane/`), puis pousser le tag `v0.8.0`
+  que `UpdateCheckMode: Tags` attend ; à Claude, relire la recette et les
+  métadonnées avant envoi.
+
+## Mission 26 — client iOS : non faite (24/11/2026)
+
+- **État** : bloquée, pas commencée.
+- **Pourquoi** : demande une chaîne Apple (`xcodegen`, Xcode,
+  `rustup target add aarch64-apple-ios`) absente de Linux ; seule la partie Rust
+  partagée serait testable ici.
+- **À confier à Claude** : reprendre la mission 26 sur un runner macOS.
