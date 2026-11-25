@@ -655,3 +655,23 @@ Une entrée par mission : fait, reste, demandé à qui.
   à rejouer sur une machine avec `nsis`.
 - **Demandé à qui** : à Gary, fournir `makensis` (paquet `nsis`) pour rejouer
   m14 et m21 en entier.
+
+## Relecture Claude des missions 18, 24, 25, 26 et fusion avec les correctifs DNSSEC (25/11/2026)
+
+- **Fait** : fusion de `master` (missions 18, 24, 25, 26) dans la branche des correctifs de la
+  relecture externe, sans conflit. Recherche de secrets sur tout ce qui n'était pas publié : aucune
+  clé, aucune adresse `.onion` réelle, aucune donnée personnelle.
+- **Vérifié** : 11 modules Go verts, `cargo test` vert dans `client-windows` (43) et
+  `outils/arti-rust` (6) ; `scripts/verifier-m25.sh`, `scripts/verifier-m26.sh`,
+  `scripts/verifier-m27.sh` verts depuis un clone sans construction préalable.
+- **Deux défauts trouvés et corrigés** :
+  - `scripts/verifier-m25.sh` comparait le jar remplacé à `client-android/build/libs/`, qui n'existe
+    que dans un arbre déjà construit : faux échec sur tout clone propre. Il compare maintenant à
+    l'empreinte épinglée de `client-android/scripts/telecharger-libs.sh`.
+  - `scripts/ci/image-rpi.sh` copiait `noeud`, `serveur` et `outils` tels quels dans l'image. Depuis
+    la mission 26, `outils/arti-rust` est un crate : un `cargo build` préalable y laisse un `target/`
+    de plusieurs Gio, qui remplissait la partition racine (« No space left on device » sur
+    `/etc/machine-id`, premier démarrage jamais terminé). Seuls les fichiers suivis par git sont
+    copiés désormais. `scripts/verifier-m24.sh` repasse avec les `target/` présents.
+- **Non prouvé ici** : rien de neuf par rapport aux comptes rendus des missions (vrai Pi, Apple,
+  soumission F-Droid) ; mission 28 toujours à faire.

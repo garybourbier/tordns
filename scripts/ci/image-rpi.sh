@@ -136,10 +136,22 @@ chmod 0644 "$ARBRE/etc/hostname" "$ARBRE/etc/hosts"
 
 # Code du nœud, tel qu'il sera installé par l'installeur commun.
 mkdir -p "$ARBRE/opt/tordns"
+# Seuls les fichiers SUIVIS par git : depuis la mission 26, outils/arti-rust est un crate, et un
+# `cargo build` préalable y laisse un target/ de plusieurs Gio qui remplissait la partition racine
+# (le premier démarrage ne pouvait plus écrire /etc/machine-id ni les clés).
 for dossier in noeud serveur outils; do
 	[ -d "$RACINE/$dossier" ] || echec "$dossier absente du dépôt"
-	cp -a "$RACINE/$dossier" "$ARBRE/opt/tordns/"
 done
+if git -C "$RACINE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	git -C "$RACINE" ls-files -z -- noeud serveur outils |
+		tar -C "$RACINE" --null -T - -cf - | tar -C "$ARBRE/opt/tordns" -xpf - ||
+		echec "copie du code du nœud"
+else
+	for dossier in noeud serveur outils; do
+		cp -a "$RACINE/$dossier" "$ARBRE/opt/tordns/"
+	done
+	find "$ARBRE/opt/tordns" -type d -name target -prune -exec rm -rf {} +
+fi
 cp -a "$RACINE/README.md" "$ARBRE/opt/tordns/"
 # Ce qui n'a rien à faire sur une carte : journaux de construction, caches.
 find "$ARBRE/opt/tordns" \( -name '*.log' -o -name '__pycache__' \) -print0 | xargs -0 -r rm -rf
