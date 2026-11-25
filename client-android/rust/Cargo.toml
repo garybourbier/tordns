@@ -10,7 +10,7 @@ name = "tordns_arti"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni = "0.21"
+jni = "0.22"
 tordns-manifeste = { path = "../../outils/manifeste-rust" }
 tordns-tor = { path = "../../outils/arti-rust" }
 
