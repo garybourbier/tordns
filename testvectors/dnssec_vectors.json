@@ -1,0 +1,584 @@
+{
+  "description": "Vecteurs de test DNSSEC communs aux trois validateurs (Linux, Windows, Android)",
+  "version": 1,
+  "vectors": [
+    {
+      "name": "signed_zone_valid",
+      "description": "Zone signée avec DNSSEC valide - devrait être ACCEPTÉE",
+      "expected_verdict": "accept",
+      "query": {
+        "name": "example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": true,
+        "answer": [
+          {
+            "type": "A",
+            "name": "example.test.",
+            "ttl": 3600,
+            "data": "192.0.2.1"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "A",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          }
+        ],
+        "authority": [
+          {
+            "type": "DNSKEY",
+            "name": "example.test.",
+            "ttl": 3600,
+            "flags": 257,
+            "protocol": 3,
+            "algorithm": 15,
+            "public_key": "base64_encoded_ed25519_pubkey"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "DNSKEY",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "unsigned_zone_nsec_proves_no_ds",
+      "description": "Zone non signée prouvée par NSEC (absence de DS) - devrait être ACCEPTÉE en mode auto",
+      "expected_verdict": "accept_unsigned",
+      "query": {
+        "name": "unsigned.example.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": false,
+        "answer": [
+          {
+            "type": "A",
+            "name": "unsigned.example.",
+            "ttl": 3600,
+            "data": "192.0.2.10"
+          }
+        ],
+        "authority": [
+          {
+            "type": "NSEC",
+            "name": "example.",
+            "ttl": 3600,
+            "next_domain": "signed.example.",
+            "type_bitmaps": ["NS", "SOA", "NSEC"]
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.",
+            "ttl": 3600,
+            "type_covered": "NSEC",
+            "algorithm": 8,
+            "labels": 1,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 38696,
+            "signer_name": ".",
+            "signature": "base64_encoded_root_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "unsigned_zone_nsec3_opt_out",
+      "description": "Zone non signée prouvée par NSEC3 opt-out - devrait être ACCEPTÉE en mode auto",
+      "expected_verdict": "accept_unsigned",
+      "query": {
+        "name": "unsigned.example.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": false,
+        "answer": [
+          {
+            "type": "A",
+            "name": "unsigned.example.",
+            "ttl": 3600,
+            "data": "192.0.2.20"
+          }
+        ],
+        "authority": [
+          {
+            "type": "NSEC3",
+            "name": "JH3M5QK9VG7R0B1T4S2N8P5A7C9E1F3H.",
+            "ttl": 3600,
+            "hash_algorithm": 1,
+            "flags": 1,
+            "iterations": 10,
+            "salt": "ABCDEF12",
+            "next_hashed_owner": "KL5M7N9P1Q3R5S7T9V1X3Z5B7D9F1H3J.",
+            "type_bitmaps": ["NS", "SOA", "NSEC3PARAM", "NSEC3"]
+          },
+          {
+            "type": "RRSIG",
+            "name": "JH3M5QK9VG7R0B1T4S2N8P5A7C9E1F3H.",
+            "ttl": 3600,
+            "type_covered": "NSEC3",
+            "algorithm": 8,
+            "labels": 1,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 38696,
+            "signer_name": ".",
+            "signature": "base64_encoded_root_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "forged_address_in_signed_zone",
+      "description": "Adresse falsifiée dans une zone signée (RRSIG ne correspond pas aux données) - devrait être REFUSÉE",
+      "expected_verdict": "reject",
+      "query": {
+        "name": "example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": true,
+        "answer": [
+          {
+            "type": "A",
+            "name": "example.test.",
+            "ttl": 3600,
+            "data": "203.0.113.9"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "A",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature_for_192_0_2_1"
+          }
+        ],
+        "authority": [
+          {
+            "type": "DNSKEY",
+            "name": "example.test.",
+            "ttl": 3600,
+            "flags": 257,
+            "protocol": 3,
+            "algorithm": 15,
+            "public_key": "base64_encoded_ed25519_pubkey"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "DNSKEY",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "missing_signature_on_signed_zone",
+      "description": "Zone signée mais réponse sans RRSIG sur A - devrait être REFUSÉE",
+      "expected_verdict": "reject",
+      "query": {
+        "name": "example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": false,
+        "answer": [
+          {
+            "type": "A",
+            "name": "example.test.",
+            "ttl": 3600,
+            "data": "192.0.2.1"
+          }
+        ],
+        "authority": [
+          {
+            "type": "DNSKEY",
+            "name": "example.test.",
+            "ttl": 3600,
+            "flags": 257,
+            "protocol": 3,
+            "algorithm": 15,
+            "public_key": "base64_encoded_ed25519_pubkey"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "expired_signature",
+      "description": "Signature expirée (périmée) - devrait être REFUSÉE",
+      "expected_verdict": "reject",
+      "query": {
+        "name": "example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": true,
+        "answer": [
+          {
+            "type": "A",
+            "name": "example.test.",
+            "ttl": 3600,
+            "data": "192.0.2.1"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "A",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2025-12-31T23:59:59Z",
+            "inception": "2024-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_expired_signature"
+          }
+        ],
+        "authority": [
+          {
+            "type": "DNSKEY",
+            "name": "example.test.",
+            "ttl": 3600,
+            "flags": 257,
+            "protocol": 3,
+            "algorithm": 15,
+            "public_key": "base64_encoded_ed25519_pubkey"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "signature_by_wrong_zone",
+      "description": "Signature faite par une autre zone (attaque cross-zone) - devrait être REFUSÉE",
+      "expected_verdict": "reject",
+      "query": {
+        "name": "victime.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": true,
+        "answer": [
+          {
+            "type": "A",
+            "name": "victime.test.",
+            "ttl": 3600,
+            "data": "192.0.2.77"
+          },
+          {
+            "type": "RRSIG",
+            "name": "victime.test.",
+            "ttl": 3600,
+            "type_covered": "A",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature_by_example_test"
+          }
+        ],
+        "authority": [
+          {
+            "type": "DNSKEY",
+            "name": "example.test.",
+            "ttl": 3600,
+            "flags": 257,
+            "protocol": 3,
+            "algorithm": 15,
+            "public_key": "base64_encoded_ed25519_pubkey"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "no_do_bit_request",
+      "description": "Requête sans bit DO - le nœud ne signe pas, validation devrait ÉCHOUER",
+      "expected_verdict": "reject_no_do",
+      "query": {
+        "name": "example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": false
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": false,
+        "answer": [
+          {
+            "type": "A",
+            "name": "example.test.",
+            "ttl": 3600,
+            "data": "192.0.2.1"
+          }
+        ],
+        "authority": [],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "nxdomain_with_nsec_proof",
+      "description": "NXDOMAIN avec preuve NSEC signée - devrait être ACCEPTÉE",
+      "expected_verdict": "accept",
+      "query": {
+        "name": "inexistant.example.test.",
+        "type": "A",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NXDOMAIN",
+        "ad_bit": true,
+        "answer": [],
+        "authority": [
+          {
+            "type": "SOA",
+            "name": "example.test.",
+            "ttl": 3600,
+            "mname": "ns.example.test.",
+            "rname": "hostmaster.example.test.",
+            "serial": 2026112401,
+            "refresh": 3600,
+            "retry": 1800,
+            "expire": 1209600,
+            "minimum": 3600
+          },
+          {
+            "type": "NSEC",
+            "name": "example.test.",
+            "ttl": 3600,
+            "next_domain": "www.example.test.",
+            "type_bitmaps": ["NS", "SOA", "A", "AAAA", "RRSIG", "NSEC", "DNSKEY"]
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "NSEC",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "SOA",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    },
+    {
+      "name": "nodata_with_nsec_proof",
+      "description": "NODATA (nom existe mais pas le type demandé) avec preuve NSEC - devrait être ACCEPTÉE",
+      "expected_verdict": "accept",
+      "query": {
+        "name": "example.test.",
+        "type": "AAAA",
+        "class": "IN",
+        "do_bit": true
+      },
+      "response": {
+        "rcode": "NOERROR",
+        "ad_bit": true,
+        "answer": [],
+        "authority": [
+          {
+            "type": "NSEC",
+            "name": "example.test.",
+            "ttl": 3600,
+            "next_domain": "www.example.test.",
+            "type_bitmaps": ["NS", "SOA", "A", "RRSIG", "NSEC", "DNSKEY"]
+          },
+          {
+            "type": "RRSIG",
+            "name": "example.test.",
+            "ttl": 3600,
+            "type_covered": "NSEC",
+            "algorithm": 15,
+            "labels": 2,
+            "original_ttl": 3600,
+            "expiration": "2027-12-31T23:59:59Z",
+            "inception": "2026-01-01T00:00:00Z",
+            "key_tag": 12345,
+            "signer_name": "example.test.",
+            "signature": "base64_encoded_signature"
+          }
+        ],
+        "additional": []
+      },
+      "trust_anchor": {
+        "type": "DS",
+        "name": ".",
+        "ttl": 86400,
+        "key_tag": 38696,
+        "algorithm": 8,
+        "digest_type": 2,
+        "digest": "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
+      }
+    }
+  ]
+}

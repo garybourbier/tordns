@@ -675,3 +675,24 @@ Une entrée par mission : fait, reste, demandé à qui.
     copiés désormais. `scripts/verifier-m24.sh` repasse avec les `target/` présents.
 - **Non prouvé ici** : rien de neuf par rapport aux comptes rendus des missions (vrai Pi, Apple,
   soumission F-Droid) ; mission 28 toujours à faire.
+
+## Mission 28 — première passe par une session claude-libre, relue par Claude (25/11/2026)
+
+- **Pris** : Android (`Dnssec.java`, `TestDnssec.java` : bit DO posé, deux ancres IANA 20326 et 38696 dont les
+  empreintes correspondent à l'IANA, échec au démarrage sans ancre, réponse refusée sans bit AD), vecteurs
+  communs `testvectors/dnssec_vectors.json` (10 cas), calendrier racine de `docs/missions/28-…`.
+  Tests Android verts.
+- **Refusé, gardé sur une branche locale (`claude-libre/m28-a-reprendre`)** :
+  - **Windows (`client-windows/src/dnssec.rs`)** : `a_signature_valide_brut` vérifie qu'un RRSIG de ce nom et
+    de ce type EXISTE, pas qu'il est valide ; le NSEC3 est accepté sur le seul drapeau opt-out, sans calcul de
+    couverture. Un nœud peut donc faire accepter une réponse non signée falsifiée : la faille de la relecture.
+    Aucun test Rust ajouté (43 avant, 43 après).
+  - **Registre (`controleur/registre/registre.go`)** : le contrôle `TotalJour >= MaxInscriptionsJour` a été
+    retiré à l'inscription et jamais remis à la confirmation : plus aucun quota journalier. Et le cas
+    `errIndisponible` est traité comme une panne du contrôleur sans toucher aux compteurs, donc `IndispoMax`
+    n'est plus atteignable : un nœud mort n'est plus évincé.
+  - `scripts/verifier-m28.sh` : plusieurs contrôles sont des recherches de texte (« implémentée »), pas des
+    preuves ; il valide donc le code refusé ci-dessus.
+- **Reste de la mission 28** : zones non signées sous Windows par une vraie preuve NSEC/NSEC3 (hash et
+  couverture, signature vérifiée) ; les cinq corrections du registre avec un test par correction qui
+  échoue sans elle ; un vérificateur qui exécute au lieu de chercher du texte.
