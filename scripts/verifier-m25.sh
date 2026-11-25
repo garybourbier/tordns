@@ -83,7 +83,9 @@ ok "jars récupérés depuis Maven Central, empreintes épinglées respectées"
 printf 'faux' >"$TMP/libs/slf4j-api-2.0.16.jar"
 LIBRAIRIES="$TMP/libs" "$RACINE/client-android/scripts/telecharger-libs.sh" >/dev/null ||
 	echec "le remplacement d'un jar corrompu a échoué"
-cmp -s "$TMP/libs/slf4j-api-2.0.16.jar" "$RACINE/client-android/build/libs/slf4j-api-2.0.16.jar" ||
+# Comparé à l'empreinte épinglée, pas à un build local (absent d'un clone propre).
+attendu=$(grep -o 'slf4j-api-2.0.16.jar|[^|]*|[0-9a-f]\{64\}' "$RACINE/client-android/scripts/telecharger-libs.sh" | grep -o '[0-9a-f]\{64\}$')
+[ -n "$attendu" ] && [ "$(sha256sum "$TMP/libs/slf4j-api-2.0.16.jar" | cut -d' ' -f1)" = "$attendu" ] ||
 	echec "le jar corrompu n'a pas été remplacé par le bon fichier"
 ok "un jar corrompu est détecté puis remplacé (empreinte contrôlée)"
 
