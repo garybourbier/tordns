@@ -11,6 +11,6 @@ name = "tordns_manifeste"
 path = "src/lib.rs"
 
 [dependencies]
-ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+ed25519-dalek = { version = "3.0", features = ["rand_core"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
