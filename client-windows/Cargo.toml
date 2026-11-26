@@ -28,4 +28,4 @@ tordns-manifeste = { path = "../outils/manifeste-rust" }
 ed25519-dalek = { version = "2.2", features = ["rand_core"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-service = "0.7"
+windows-service = "0.8"
