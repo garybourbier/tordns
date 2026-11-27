@@ -129,10 +129,19 @@ final class Dnssec {
         }
     }
 
+    /**
+     * Ancres racine livrées, dans l'ordre de chargement. Pendant un roulement,
+     * les deux coexistent : en retirer une seule casserait soit la racine
+     * actuelle, soit les résolveurs qui n'ont pas encore l'ancre suivante.
+     */
+    static String[] ancresLivrees() {
+        return new String[]{ANCRE_KSK_2017, ANCRE_KSK_2024};
+    }
+
     /** Charge les ancres racine IANA dans le validateur. Échoue si aucune n'est valide. */
     private static void chargerAncreRacine(ValidatingResolver validateur) throws IOException {
         int chargees = 0;
-        for (String dsStr : new String[]{ANCRE_KSK_2017, ANCRE_KSK_2024}) {
+        for (String dsStr : ancresLivrees()) {
             try {
                 org.xbill.DNS.Tokenizer tok = new org.xbill.DNS.Tokenizer(dsStr);
                 org.xbill.DNS.Record rec = org.xbill.DNS.Record.fromString(

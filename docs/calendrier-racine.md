@@ -48,6 +48,37 @@ Conséquence : une rotation doit être livrée **avant** la date de retrait de
 l'ancienne ancre. Pour KSK-2017, la version embarquant KSK-2024 devait être
 installée avant le 22/03/2027 ; c'est déjà le cas des versions actuelles.
 
+### Invariant des trois plateformes
+
+Une ancre ajoutée à un seul client est pire qu'aucune ancre ajoutée : cette
+plateforme change de racine de confiance sans que les autres suivent, et une
+release peut partir avec un ensemble incohérent. L'ensemble livré doit rester
+le même partout, et il doit contenir **au moins deux** ancres tant que l'IANA
+n'a pas retiré l'ancienne :
+
+- Linux : `TestDNSSECAncresLivrees` exige les deux DS et le bon nombre
+d'ancres, `TestDNSSECPlusieursAncresUneSuffit` prouve qu'une chaîne est
+  acceptée dès qu'une ancre la valide ;
+- Windows : `les_ancres_du_roulement_coexistent` exige KSK-2024 **et** toutes
+  les ancres par défaut de hickory, et au moins deux ancres au total ;
+- Android : le test des ancres livrées exige les deux DS (key tags 20326 et
+  38696) et `ancresLivrees()` renvoie exactement les mêmes.
+
+Ces trois tests tournent dans `scripts/verifier-m28.sh` : une rotation qui
+oublie une plateforme échoue avant la release.
+
+### Prochaine rotation
+
+À la publication de l'ancre suivante par l'IANA :
+
+1. ajouter son DS dans les trois clients, dans le même commit, sans retirer
+   KSK-2024 ;
+2. faire passer les trois suites (l'invariant ci-dessus échoue si une
+   plateforme manque) ;
+3. livrer une release signée avant le retrait de KSK-2024 ;
+4. ne retirer l'ancienne ancre qu'après sa disparition de la zone racine, dans
+   une release ultérieure.
+
 Si une livraison d'ancre par le manifeste est ajoutée un jour, elle devra être
 un champ explicite et revu (une ancre est une racine de confiance : la faire
 transporter par le même manifeste que les binaires ne change pas le modèle de

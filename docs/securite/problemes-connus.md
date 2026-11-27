@@ -65,6 +65,11 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
 
 - **Windows** : installation réelle, redémarrage et ACL NTFS non prouvés hors
   Windows (Wine n'a pas d'ACL NTFS). (journal, missions 12 et 13)
+- **Windows, réponses négatives NSEC3** : hickory 0.24 ne valide que les
+  preuves NSEC. Un NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est
+  refusé (SERVFAIL) plutôt qu'accepté sans preuve. C'est conservateur, mais
+  une partie des zones signées de l'Internet utilise NSEC3 ; aucun nom n'est
+  mal résolu, ces réponses échouent. (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)
 - **Android** : l'APK n'est pas signé par une clé de production dans les

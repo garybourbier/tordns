@@ -538,3 +538,174 @@ func TestNormalisationAdresses(t *testing.T) {
 		}
 	}
 }
+
+// Mission 28, point 3 : la référence DNSSEC du contrôleur est injoignable.
+// La faute est imputable au contrôleur : la passe est abandonnée et AUCUN
+// compteur du bénévole ne bouge (ni échec, ni date du dernier succès).
+func TestReferenceInjoignableNAllereAucunCompteur(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	n := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n)
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+	avant, ok := r.instantane().Admis[n.adresse()]
+	if !ok {
+		t.Fatal("nœud honnête non admis")
+	}
+
+	// La référence ne répond plus : port fermé, échec immédiat.
+	r.cfg.Reference = "127.0.0.1:1"
+	if _, err := r.passe(); err == nil {
+		t.Fatal("passe sans référence : aucune erreur")
+	}
+	apres, ok := r.instantane().Admis[n.adresse()]
+	if !ok {
+		t.Fatal("nœud évincé alors que la faute vient du contrôleur")
+	}
+	if apres.SondesKO != avant.SondesKO || apres.SuiteKO != avant.SuiteKO ||
+		apres.SondesOK != avant.SondesOK || !apres.DernierOK.Equal(avant.DernierOK) {
+		t.Fatalf("compteurs modifiés par une panne de la référence : avant %+v, après %+v", avant, apres)
+	}
+}
+
+// Mission 28, point 3 : les échecs consécutifs se remettent à zéro après un
+// succès, et IndispoMax évince un nœud durablement injoignable (le compteur
+// historique SondesKO, lui, reste pour la disponibilité publiée).
+func TestIndisponibilitesConsecutivesPuisEviction(t *testing.T) {
+	r, _, _ := registreDeTest(t) // IndispoMax = 2
+	n := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n)
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Réponse inexploitable : le nœud est indisponible, pas le contrôleur.
+	n.fixe.Store([]byte("pas un message DNS"))
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := r.instantane().Admis[n.adresse()]
+	if !ok {
+		t.Fatal("nœud évincé après un seul échec alors que IndispoMax vaut 2")
+	}
+	if a.SuiteKO != 1 || a.SondesKO != 1 {
+		t.Fatalf("échec non compté : %+v", a)
+	}
+
+	// Un succès remet les échecs consécutifs à zéro, sans effacer l'historique.
+	n.fixe.Store(reponseFactice(0, true))
+	if _, err := r.passe(); err != nil {
+		t.Fatal(err)
+	}
+	a, ok = r.instantane().Admis[n.adresse()]
+	if !ok {
+		t.Fatal("nœud évincé après un succès")
+	}
+	if a.SuiteKO != 0 {
+		t.Fatalf("échecs consécutifs non remis à zéro : %+v", a)
+	}
+	if a.SondesKO != 1 {
+		t.Fatalf("historique d'échecs effacé : %+v", a)
+	}
+
+	// Deux échecs consécutifs : éviction et pool mis à jour.
+	n.fixe.Store([]byte("pas un message DNS"))
+	for i := 0; i < 2; i++ {
+		if _, err := r.passe(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := r.instantane()
+	if _, ok := e.Admis[n.adresse()]; ok {
+		t.Fatal("nœud injoignable toujours admis après IndispoMax")
+	}
+	if _, ok := e.Evinces[n.adresse()]; !ok {
+		t.Fatal("nœud injoignable non conservé comme évincé")
+	}
+}
+
+// Mission 28, point 3 : le quota journalier se décompte à la confirmation.
+// Une inscription non confirmée ne consomme rien ; la confirmation qui dépasse
+// le quota est refusée.
+func TestQuotaJournalierALaConfirmation(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.MaxInscriptionsJour = 1
+
+	n1 := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n1)
+	if e := r.instantane(); e.TotalJour != 1 {
+		t.Fatalf("quota non décompté à la confirmation : %d", e.TotalJour)
+	}
+
+	// Une inscription non confirmée ne consomme pas le quota.
+	n2 := nouveauFauxNoeud(t)
+	c2, err := r.inscrire(n2.adresse(), "", "127.0.0.2")
+	if err != nil {
+		t.Fatalf("inscription refusée alors que le quota n'est décompté qu'à la confirmation : %v", err)
+	}
+	if e := r.instantane(); e.TotalJour != 1 {
+		t.Fatalf("quota décompté à l'inscription : %d", e.TotalJour)
+	}
+	n2.defi.Store(c2.Defi)
+	if _, err := r.confirmer(c2.Adresse); err == nil {
+		t.Fatal("confirmation acceptée au-delà du quota journalier")
+	}
+}
+
+// Mission 28, point 3 : rétention. Les candidats non confirmés anciens et les
+// évincés anciens sont purgés ; les confirmés et les récents restent.
+func TestRetentionPurgeCandidatsEtEvinces(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	r.cfg.RetentionCandidats = time.Hour
+	r.cfg.RetentionEvinces = time.Hour
+	maintenant := time.Now().UTC()
+	ancien := maintenant.Add(-2 * time.Hour)
+
+	r.etat.Candidats["127.0.0.1:1"] = &candidat{Adresse: "127.0.0.1:1", Depuis: ancien}
+	r.etat.Candidats["127.0.0.1:2"] = &candidat{Adresse: "127.0.0.1:2", Depuis: ancien, Confirme: true}
+	r.etat.Candidats["127.0.0.1:3"] = &candidat{Adresse: "127.0.0.1:3", Depuis: maintenant}
+	r.etat.Evinces["127.0.0.1:4"] = ancien
+	r.etat.Evinces["127.0.0.1:5"] = maintenant
+
+	r.changerJour(maintenant)
+
+	e := r.instantane()
+	if _, ok := e.Candidats["127.0.0.1:1"]; ok {
+		t.Fatal("candidat non confirmé ancien non purgé")
+	}
+	if _, ok := e.Candidats["127.0.0.1:2"]; !ok {
+		t.Fatal("candidat confirmé purgé")
+	}
+	if _, ok := e.Candidats["127.0.0.1:3"]; !ok {
+		t.Fatal("candidat récent purgé")
+	}
+	if _, ok := e.Evinces["127.0.0.1:4"]; ok {
+		t.Fatal("évincé ancien non purgé")
+	}
+	if _, ok := e.Evinces["127.0.0.1:5"]; !ok {
+		t.Fatal("évincé récent purgé")
+	}
+}
+
+// Mission 28, point 3 : chaque sonde utilise un identifiant DNS aléatoire, que
+// le nœud ne peut pas anticiper.
+func TestSondeIdentifiantDNSAleatoire(t *testing.T) {
+	r, _, _ := registreDeTest(t)
+	n := nouveauFauxNoeud(t)
+	inscrireEtConfirmer(t, r, n)
+	vus := map[uint16]bool{}
+	for i := 0; i < 8; i++ {
+		_, mesures, err := r.sonderAvecMesures(n.adresse(), []string{"exemple.test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(mesures) != 1 || mesures[0].DnsID == 0 {
+			t.Fatalf("identifiant DNS absent de la mesure : %+v", mesures)
+		}
+		vus[mesures[0].DnsID] = true
+	}
+	if len(vus) < 2 {
+		t.Fatal("identifiant DNS identique à chaque sonde")
+	}
+}

@@ -768,3 +768,87 @@ Une entrée par mission : fait, reste, demandé à qui.
 - **NON PROUVÉ** : DNSSEC contre la racine réelle côté Windows et Android ;
   rotation d'ancre sur un parc réel ; diagnostic à travers Tor (les essais
   passent par HTTPS direct) ; le manifeste ne transporte toujours pas d'ancre.
+
+## Mission 28 — reste DNSSEC, audit des preuves et pré-release (27/11/2026)
+
+- **Trois cas Android `n/a` levés** (`signed_zone_valid`, `expired_signature`,
+  `signature_by_wrong_zone`) : le validateur acceptait déjà une ancre injectée
+  en test, mais une seule requête était partagée par toutes les fixtures. Le
+  harnais porte maintenant requête, transport et ancre par cas. Chaîne signée
+  complète → `accept` ; signature dont la fenêtre de validité est entièrement
+  passée → `reject` ; adresse de `victime.test.` signée par la clé d'une autre
+  zone, **même ancrée** → `reject`.
+- **Réponses négatives, Windows et Android** :
+  - Windows refusait tout NODATA comme « réponse validée vide » et classait
+    une NXDOMAIN/NODATA signée comme « zone non signée », ce qui sautait le
+    contrôle d'horloge. `est_zone_non_signee` exclut désormais les réponses
+    portant une SOA ; `nodata_prouve` exige un NSEC AU NOM DEMANDÉ dont le
+    bitmap n'annonce pas le type, `nxdomain_prouve` une SOA et un NSEC retenus.
+    Un NSEC d'un autre nom, une preuve absente et une signature périmée sont
+    refusés (trois tests).
+  - Android valide NXDOMAIN et NODATA avec SOA + NSEC signés ; un NSEC hors
+    intervalle et un NODATA dont le bitmap annonce A sont refusés (deux tests).
+  - `testvectors/dnssec_vectors.json` passe en version 3 : les dix cas sont
+    applicables aux trois plateformes (sauf `no_do_bit_request`, qui n'a de
+    sens que côté Android puisque Linux et Windows posent DO eux-mêmes).
+- **Preuve de non-vacuité de la garde Windows** : en neutralisant la condition
+  qui exclut les réponses négatives de `est_zone_non_signee`, le test
+  `negatif_a_signature_perimee_refuse` échoue ; fichier restauré ensuite.
+- **Ancres racine** : `les_ancres_du_roulement_coexistent` (Windows) exige
+  KSK-2024 **et** toutes les ancres par défaut de hickory, au moins deux au
+  total ; Android expose `ancresLivrees()` et le test lit les deux DS (key tags
+  20326 et 38696). `docs/calendrier-racine.md` porte l'invariant des trois
+  plateformes et la procédure de la prochaine rotation. Le manifeste ne
+  transporte toujours aucune ancre : ajouter ce champ change le modèle de
+  confiance, c'est une décision de Gary (`docs/a-faire-gary.md`).
+- **Audit des preuves par `grep`** : les étapes 1 à 3 de `verifier-m28.sh` ne
+  prouvaient que l'existence d'identifiants dans le source. Elles exécutent
+  désormais les tests (ancres Android, ancres et réponses négatives Windows,
+  cinq tests du registre) et vérifient que chaque test apparaît en `--- PASS`.
+  Les `grep` restants portent sur des contrats de document (une section
+  existe), sur la consommation du fichier de vecteurs, ou sur l'absence d'un
+  motif : aucun ne remplace un test de comportement.
+- **Deux défauts réels trouvés dans le registre pendant cet audit** :
+  - une référence DNSSEC injoignable (faute du contrôleur) incrémentait
+    `SondesKO` du bénévole et pouvait l'évincer : elle lève maintenant
+    `errReference`, la passe est abandonnée et aucun compteur ne bouge ;
+  - l'éviction pour indisponibilité était devenue du code mort (la condition
+    testait `errIndisponible` dans une branche qui l'excluait), donc un nœud
+    mort restait admis indéfiniment. Un champ `echecs_consecutifs` (candidat et
+    admis) compte les échecs de suite, remis à zéro par un succès ;
+    `SondesKO` reste l'historique qui alimente la disponibilité publiée.
+  - **Le quota journalier n'était appliqué nulle part** : `TotalJour`
+    s'incrémentait à la confirmation sans jamais être comparé à
+    `MaxInscriptionsJour`. La confirmation est maintenant refusée au-delà.
+- **Cinq tests de comportement** remplacent les cinq `grep` du registre :
+  `TestReferenceInjoignableNAllereAucunCompteur`,
+  `TestIndisponibilitesConsecutivesPuisEviction`,
+  `TestQuotaJournalierALaConfirmation`,
+  `TestRetentionPurgeCandidatsEtEvinces`,
+  `TestSondeIdentifiantDNSAleatoire`. Couverture du paquet : 68,7 % → **70,8 %**.
+- **Docs** : `Kotlin` → `Java` dans le périmètre d'audit et la demande OTF ;
+  `docs/missions/00-lire-moi.md` liste la mission 28 et son état ;
+  `docs/a-faire-gary.md` regroupe les actions externes ;
+  `docs/checklist-release-0.8.0.md` porte la passe de pré-release ;
+  `docs/securite/problemes-connus.md` note la limite NSEC3 des réponses
+  négatives Windows.
+- **Pré-release 0.8.0 (27/11/2026)** : `scripts/ci/lint.sh` vert (actionlint,
+  shellcheck, gofmt, `go vet`, `cargo fmt`), `verifier-version-tag.sh v0.8.0`
+  vert, `notes-release.sh v0.8.0` non vide, `verifier-m16.sh`,
+  `verifier-m25.sh` et `verifier-m28.sh` verts. `verifier-m14.sh` et
+  `verifier-m21.sh` échouent sur « makensis absent » : tout le reste de leurs
+  étapes passe.
+- **Vérifié** : `go test ./...` dans `client-linux` (tous les paquets),
+  `go test ./...` dans `controleur/registre`, `cargo test --locked` dans
+  `client-windows` (**55 tests**), `client-android/scripts/tester.sh`
+  (**33 vérifications DNSSEC**, 33 locales), `scripts/ci/lint.sh` code 0,
+  `scripts/verifier-m28.sh` code 0.
+- **NON PROUVÉ** :
+  - réponses négatives contre de vrais domaines signés, en particulier
+    NSEC3 : Windows les refuse par construction (limite hickory 0.24), donc
+    un NXDOMAIN réel en zone NSEC3 reste en SERVFAIL côté Windows ;
+  - DNSSEC contre la racine réelle côté Windows et Android (fixtures hors
+    ligne seulement) ;
+  - première rotation d'ancre réellement livrée à un parc ;
+  - premier passage GitHub Actions, signature APK, notarisation, attestations
+    et images GHCR (voir `docs/checklist-release-0.8.0.md`).

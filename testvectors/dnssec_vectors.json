@@ -1,6 +1,6 @@
 {
   "description": "Cas de conformité DNSSEC communs aux trois validateurs. Chaque cas nomme une situation et le verdict attendu sur chaque plateforme ; les fixtures cryptographiques sont construites par la suite de tests de chaque langage (les clés de test ne sont pas partagées). Les trois suites lisent ce fichier et ÉCHOUENT si un cas applicable n'a pas de fixture, ou si le verdict observé diffère.",
-  "version": 2,
+  "version": 3,
   "verdicts": ["accept", "accept_unsigned", "reject"],
   "vectors": [
     {
@@ -11,9 +11,9 @@
       "plateformes": {
         "linux": "accept",
         "windows": "accept",
-        "android": "n/a"
+        "android": "accept"
       },
-      "notes": "Android : le validateur remonte jusqu'aux ancres racine IANA, une zone de test ne peut donc pas produire un « tout signé » vérifiable sans racine réelle."
+      "notes": "Android : ancre injectée (clé de la zone) pour un test hors ligne ; la production remonte aux ancres racine IANA."
     },
     {
       "name": "unsigned_zone_nsec_proves_no_ds",
@@ -60,16 +60,16 @@
       "description": "Signature authentique mais hors de sa période de validité (rejeu d'une chaîne archivée).",
       "query": { "name": "www.example.test.", "type": "A", "do_bit": true },
       "expected_verdict": "reject",
-      "plateformes": { "linux": "reject", "windows": "reject", "android": "n/a" },
-      "notes": "Android : pas de fixture d'horloge, non couvert à ce jour."
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "reject" },
+      "notes": "Android : fixture signée avec une fenêtre de validité entièrement passée."
     },
     {
       "name": "signature_by_wrong_zone",
       "description": "Signature parfaitement valide, mais faite par une zone qui n'est ni le nom signé ni un de ses ancêtres (attaque cross-zone).",
       "query": { "name": "victime.test.", "type": "A", "do_bit": true },
       "expected_verdict": "reject",
-      "plateformes": { "linux": "reject", "windows": "reject", "android": "n/a" },
-      "notes": "Linux couvre aussi le voisin de suffixe (badexample.test signé par example.test)."
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "reject" },
+      "notes": "Linux couvre aussi le voisin de suffixe (badexample.test signé par example.test). Android : la clé attaquante est même ancrée, ce qui montre que le contrôle du signataire ne dépend pas de l'ancre."
     },
     {
       "name": "no_do_bit_request",
@@ -84,16 +84,16 @@
       "description": "NXDOMAIN accompagné de la preuve NSEC signée (couverture du nom et absence de wildcard).",
       "query": { "name": "absent.example.test.", "type": "A", "do_bit": true },
       "expected_verdict": "accept",
-      "plateformes": { "linux": "accept", "windows": "n/a", "android": "n/a" },
-      "notes": "Windows et Android ne valident pas encore les réponses négatives ; non couvert, donc aucun verdict inventé."
+      "plateformes": { "linux": "accept", "windows": "accept", "android": "accept" },
+      "notes": "Windows : NSEC retenu par le validateur, SOA et signatures contrôlées. Android : NSEC et SOA signés dans la section autorité, adresse absente."
     },
     {
       "name": "nodata_with_nsec_proof",
       "description": "Nom existant, type A demandé et absent, prouvé par un NSEC signé qui annonce TXT mais pas A.",
       "query": { "name": "present.example.test.", "type": "A", "do_bit": true },
       "expected_verdict": "accept",
-      "plateformes": { "linux": "accept", "windows": "n/a", "android": "n/a" },
-      "notes": "Le pendant refusé (NSEC qui annonce le type demandé) est couvert par les tests Linux."
+      "plateformes": { "linux": "accept", "windows": "accept", "android": "accept" },
+      "notes": "Windows : NSEC au nom demandé dont le bitmap n'annonce pas A ; un NSEC d'un autre nom est refusé (test). Android : NSEC au nom demandé, bitmap TXT sans A."
     }
   ]
 }

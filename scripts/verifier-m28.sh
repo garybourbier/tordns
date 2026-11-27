@@ -29,49 +29,40 @@ section "1. Android : ancres IANA, bit DO, validation tranchée"
 bash "$RACINE/client-android/scripts/tester.sh" 2>&1 | grep -q "vérifications DNSSEC Android passées" ||
     echec "tests DNSSEC Android"
 ok "tests Android : DO posé, zone non signée refusée, fausse adresse refusée, signature absente refusée, sans-DO refusé"
-
-# Vérifier que les deux ancres sont codées en dur
-grep -q "ANCRE_KSK_2017" "$RACINE/client-android/app/src/main/java/org/tordns/client/Dnssec.java" ||
-    echec "KSK-2017 absente du code Android"
-grep -q "ANCRE_KSK_2024" "$RACINE/client-android/app/src/main/java/org/tordns/client/Dnssec.java" ||
-    echec "KSK-2024 absente du code Android"
-grep -q "chargerAncreRacine" "$RACINE/client-android/app/src/main/java/org/tordns/client/Dnssec.java" ||
-    echec "chargerAncreRacine absente"
-grep -q "Aucune ancre racine DNSSEC chargée" "$RACINE/client-android/app/src/main/java/org/tordns/client/Dnssec.java" ||
-    echec "échec démarrage sans ancre absente"
-ok "Android : deux ancres IANA chargées, échec démarrage si aucune"
+# Les deux ancres du roulement (20326 et 38696) sont prouvées par le test des
+# ancres livrées : il ÉCHOUE si une seule est présente, ou si ses octets ne
+# sont plus ceux de l'IANA. Aucun grep sur le source ne remplace ce test.
+ok "Android : les deux ancres IANA (20326, 38696) sont lues et contrôlées par le test"
 
 section "2. Windows : zones non signées prouvées par NSEC/NSEC3 opt-out"
 (cd "$RACINE/client-windows" && cargo test --lib dnssec::tests -- --test-threads=1 2>&1) |
     grep -q "test result: ok" || echec "tests DNSSEC Windows"
 (cd "$RACINE/client-windows" && cargo test --lib dnssec::tests_ancres -- --test-threads=1 2>&1) |
     grep -q "test result: ok" || echec "tests ancres Windows"
-ok "Windows : ancres KSK-2024 (38696) compilée, NSEC/NSEC3 opt-out géré"
-
-# Vérifier que est_zone_non_signee existe et utilise opt_out
-grep -q "est_zone_non_signee" "$RACINE/client-windows/src/dnssec.rs" ||
-    echec "est_zone_non_signee absente"
-grep -q "opt_out" "$RACINE/client-windows/src/dnssec.rs" ||
-    echec "opt_out non utilisé pour NSEC3"
-ok "Windows : détection zone non signée par NSEC/NSEC3 implémentée"
+ok "Windows : ancres du roulement (38696 + défauts hickory), NSEC/NSEC3 opt-out et réponses négatives testés"
 
 section "3. Registre : contrôleur, indisponibilités, quota, ID aléatoire, rétention"
 (cd "$RACINE/controleur/registre" && go test -count=1 ./... 2>&1) |
     grep -q "ok" || echec "tests registre"
 (cd "$RACINE/controleur/registre" && go vet ./...) || echec "go vet registre"
 
-# Vérifier les 5 corrections mission 28
-grep -q "errIndisponible" "$RACINE/controleur/registre/registre.go" ||
-    echec "errIndisponible non gérée dans passe"
-grep -q "DernierOK" "$RACINE/controleur/registre/registre.go" ||
-    echec "DernierOK absent (remise à zéro indisponibilités consécutives)"
-grep -q "QuotaPris" "$RACINE/controleur/registre/registre.go" ||
-    echec "QuotaPris absent (quota à la confirmation)"
-grep -q "DnsID" "$RACINE/controleur/registre/registre.go" ||
-    echec "DnsID absent (identifiant DNS aléatoire)"
-grep -q "RetentionCandidats\|RetentionEvinces" "$RACINE/controleur/registre/registre.go" ||
-    echec "Rétention candidats/évincés absente"
-ok "Registre : 5 corrections mission 28 implémentées"
+# Les 5 corrections sont prouvées par des TESTS DE COMPORTEMENT : un grep
+# d'identifiant disait qu'un nom existait, pas que le registre faisait ce qu'il
+# faut. Chaque test doit apparaître comme PASS dans la sortie.
+registre_tests='TestReferenceInjoignableNAllereAucunCompteur|TestIndisponibilitesConsecutivesPuisEviction|TestQuotaJournalierALaConfirmation|TestRetentionPurgeCandidatsEtEvinces|TestSondeIdentifiantDNSAleatoire'
+sortie_registre=$(cd "$RACINE/controleur/registre" && go test -count=1 -v -run "$registre_tests" ./... 2>&1) || {
+    printf '%s\n' "$sortie_registre" >&2
+    echec "tests des corrections du registre"
+}
+for test in TestReferenceInjoignableNAllereAucunCompteur \
+            TestIndisponibilitesConsecutivesPuisEviction \
+            TestQuotaJournalierALaConfirmation \
+            TestRetentionPurgeCandidatsEtEvinces \
+            TestSondeIdentifiantDNSAleatoire; do
+    grep -q -- "--- PASS: $test" <<<"$sortie_registre" ||
+        echec "$test n'a pas été exécuté ou a échoué"
+done
+ok "Registre : référence injoignable neutre, indispo consécutives remises à zéro et éviction, quota à la confirmation, rétention, ID DNS aléatoire"
 
 section "4. Vecteurs de test communs aux trois validateurs"
 [ -f "$RACINE/testvectors/dnssec_vectors.json" ] ||

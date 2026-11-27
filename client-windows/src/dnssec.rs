@@ -117,7 +117,22 @@ fn est_zone_non_signee(
 ) -> Result<bool, String> {
     use hickory_proto::rr::RecordType;
 
+    use hickory_proto::op::ResponseCode;
+
     let nom_question = question.name();
+
+    // Une réponse NÉGATIVE (NXDOMAIN ou NODATA, reconnaissable à sa SOA) n'est
+    // pas une délégation non signée : ses preuves sont signées et doivent
+    // passer les contrôles de signature, horloge comprise. Sans cette garde,
+    // un NSEC de NODATA sans DS faisait accepter la réponse comme « zone non
+    // signée » et sautait le contrôle de validité.
+    let a_soa = valide
+        .name_servers()
+        .iter()
+        .any(|r| r.record_type() == RecordType::SOA);
+    if valide.response_code() == ResponseCode::NXDomain || a_soa {
+        return Ok(false);
+    }
 
     // Si la réponse a des réponses valides signées, ce n'est pas une zone non signée
     let a_reponses_signees = valide.answers().iter().any(|r| {
@@ -233,6 +248,45 @@ fn preuve_presente_brut(brut: &Message, nom: &Name, type_rr: RecordType) -> bool
         .any(|r| r.record_type() == type_rr && (r.name() == nom || r.name().eq_case(nom)))
 }
 
+/// Vrai si le message retenu contient la SOA de la zone du nom demandé.
+fn zone_autoritaire(nom: &Name, valide: &Message) -> bool {
+    valide
+        .name_servers()
+        .iter()
+        .any(|rr| rr.record_type() == RecordType::SOA && rr.name().zone_of(nom))
+}
+
+/// NODATA : le nom existe, le type demandé non. Preuve exigée dans le message
+/// retenu : la SOA de la zone et un NSEC AU NOM DEMANDÉ dont le bitmap
+/// n'annonce pas le type. Un NSEC d'un autre nom ne prouve rien.
+fn nodata_prouve(question: &hickory_proto::op::Query, valide: &Message) -> bool {
+    if !zone_autoritaire(question.name(), valide) {
+        return false;
+    }
+    valide.name_servers().iter().any(|rr| {
+        rr.record_type() == RecordType::NSEC
+            && rr.name().eq_case(question.name())
+            && rr
+                .data()
+                .and_then(RData::as_dnssec)
+                .and_then(DNSSECRData::as_nsec)
+                .is_some_and(|nsec| !nsec.type_bit_maps().contains(&question.query_type()))
+    })
+}
+
+/// NXDOMAIN : hickory 0.24 vérifie la couverture NSEC et l'absence de wildcard
+/// avant de rendre le message ; on exige en plus que la preuve soit RETENUE et
+/// que la SOA de la zone soit présente. Les réponses négatives NSEC3, que
+/// hickory ne sait pas valider, restent refusées : rien n'est accepté sans
+/// preuve vérifiée.
+fn nxdomain_prouve(question: &hickory_proto::op::Query, valide: &Message) -> bool {
+    zone_autoritaire(question.name(), valide)
+        && valide
+            .name_servers()
+            .iter()
+            .any(|rr| rr.record_type() == RecordType::NSEC)
+}
+
 /// Tolérance d'horloge sur la validité des signatures : un poste peut dériver,
 /// mais une tolérance large rouvrirait le rejeu de chaînes archivées.
 const DERIVE_HORLOGE_S: i64 = 300;
@@ -276,9 +330,12 @@ fn controler(
         let repond = valide.answers().iter().any(|r| {
             r.name().eq_case(question.name()) || r.name() == question.name()
         } && (r.record_type() == question.query_type() || r.record_type() == RecordType::CNAME));
-        if !repond {
+        if !repond && !nodata_prouve(question, valide) {
             return Err("réponse validée vide pour la question posée".into());
         }
+    } else if valide.response_code() == ResponseCode::NXDomain && !nxdomain_prouve(question, valide)
+    {
+        return Err("NXDOMAIN sans preuve d'inexistence retenue".into());
     }
     for r in valide.answers().iter().chain(valide.name_servers()) {
         if r.record_type() == RecordType::RRSIG {
@@ -312,8 +369,10 @@ fn controler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hickory_proto::op::{Query, ResponseCode};
     use hickory_proto::rr::dnssec::rdata::{DNSSECRData, DNSKEY, RRSIG};
     use hickory_proto::rr::dnssec::{tbs, Algorithm, KeyPair, PublicKeyEnum, SigSigner};
+    use hickory_proto::rr::rdata::SOA;
     use hickory_proto::rr::{Name, RData, Record, RecordType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -657,6 +716,8 @@ mod tests {
             ),
             ("expired_signature", verdict_signature_perimee),
             ("signature_by_wrong_zone", verdict_autre_zone),
+            ("nxdomain_with_nsec_proof", verdict_nxdomain_nsec),
+            ("nodata_with_nsec_proof", verdict_nodata_nsec),
         ];
 
         for (nom, attendu) in &cas {
@@ -739,6 +800,152 @@ mod tests {
             Name::parse("unsigned.example.test.", None).unwrap(),
             RecordType::A,
         )
+    }
+
+    /// Message négatif signé : SOA et NSEC de la zone, chacun avec son RRSIG.
+    fn message_negatif(
+        nom: &Name,
+        rcode: ResponseCode,
+        nsec: Record,
+        zone: &Name,
+        signer: &SigSigner,
+    ) -> Message {
+        let soa = Record::from_rdata(
+            zone.clone(),
+            300,
+            RData::SOA(SOA::new(
+                Name::parse("ns.example.test.", None).unwrap(),
+                Name::parse("hostmaster.example.test.", None).unwrap(),
+                1,
+                3600,
+                600,
+                86400,
+                300,
+            )),
+        );
+        let mut m = Message::new();
+        m.set_response_code(rcode);
+        m.add_query(Query::query(nom.clone(), RecordType::A));
+        m.add_name_server(soa.clone());
+        m.add_name_server(record_signe(zone, vec![soa], signer));
+        let nom_nsec = nsec.name().clone();
+        m.add_name_server(nsec.clone());
+        m.add_name_server(record_signe(&nom_nsec, vec![nsec], signer));
+        m
+    }
+
+    /// NXDOMAIN prouvé par NSEC : nom absent et wildcard absent.
+    fn verdict_nxdomain_nsec() -> &'static str {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let nsec = nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        );
+        h.dns_reponse = message_negatif(&absent, ResponseCode::NXDomain, nsec, &h.zone, &signer)
+            .to_vec()
+            .unwrap();
+        classer(valider(h, question(&absent), ancre))
+    }
+
+    /// NODATA prouvé par NSEC : le nom existe, le bitmap n'annonce pas A.
+    fn verdict_nodata_nsec() -> &'static str {
+        let (mut h, ancre, signer) = fixture_complete();
+        let present = Name::parse("www.example.test.", None).unwrap();
+        let nsec = nsec_rr(
+            "www.example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA, RecordType::TXT],
+        );
+        h.dns_reponse = message_negatif(&present, ResponseCode::NoError, nsec, &h.zone, &signer)
+            .to_vec()
+            .unwrap();
+        classer(valider(h, question(&present), ancre))
+    }
+
+    #[test]
+    fn nxdomain_sans_preuve_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        // SOA seule : hickory ne peut pas prouver l'inexistence.
+        let mut m = message_negatif(
+            &absent,
+            ResponseCode::NXDomain,
+            nsec_rr("example.test.", "zzz.example.test.", &[RecordType::NS]),
+            &h.zone,
+            &signer,
+        );
+        m.name_servers_mut()
+            .retain(|r| r.record_type() != RecordType::NSEC);
+        h.dns_reponse = m.to_vec().unwrap();
+        assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
+    }
+
+    #[test]
+    fn nodata_sans_nsec_au_nom_demande_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let present = Name::parse("www.example.test.", None).unwrap();
+        // NSEC d'un autre nom : il ne prouve pas l'absence de A à ce nom.
+        let nsec = nsec_rr(
+            "autre.example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        );
+        h.dns_reponse = message_negatif(&present, ResponseCode::NoError, nsec, &h.zone, &signer)
+            .to_vec()
+            .unwrap();
+        assert_eq!(classer(valider(h, question(&present), ancre)), "reject");
+    }
+
+    /// Les signatures d'une réponse négative passent aussi par le contrôle
+    /// d'horloge : une preuve archivée et rejouée est refusée.
+    #[test]
+    fn negatif_a_signature_perimee_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let nsec = nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        );
+        let mut m = Message::new();
+        m.set_response_code(ResponseCode::NXDomain);
+        m.add_query(Query::query(absent.clone(), RecordType::A));
+        let soa = Record::from_rdata(
+            h.zone.clone(),
+            300,
+            RData::SOA(SOA::new(
+                Name::parse("ns.example.test.", None).unwrap(),
+                Name::parse("hostmaster.example.test.", None).unwrap(),
+                1,
+                3600,
+                600,
+                86400,
+                300,
+            )),
+        );
+        m.add_name_server(soa.clone());
+        m.add_name_server(record_signe_par(
+            &h.zone,
+            &h.zone,
+            vec![soa],
+            &signer,
+            maintenant() - 20_000,
+            maintenant() - 10_000,
+        ));
+        let nom_nsec = nsec.name().clone();
+        m.add_name_server(nsec.clone());
+        m.add_name_server(record_signe_par(
+            &nom_nsec,
+            &h.zone,
+            vec![nsec],
+            &signer,
+            maintenant() - 20_000,
+            maintenant() - 10_000,
+        ));
+        h.dns_reponse = m.to_vec().unwrap();
+        assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
     }
 
     #[test]
@@ -876,5 +1083,33 @@ mod tests_ancres {
             hex,
             "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"
         );
+    }
+
+    /// Pendant un roulement, plusieurs ancres coexistent : la KSK-2024 livrée
+    /// par ce dépôt et les ancres de hickory (dont KSK-2017, 20326). Une seule
+    /// ancre livrée casserait soit aujourd'hui, soit au retrait de l'ancienne.
+    #[test]
+    fn les_ancres_du_roulement_coexistent() {
+        let ancre = ancres_racine();
+        let cle_2024 = PublicKeyEnum::from_public_bytes(KSK_2024, Algorithm::RSASHA256)
+            .expect("clé KSK-2024 illisible");
+        assert!(
+            ancre.contains(&cle_2024),
+            "KSK-2024 absente des ancres livrées"
+        );
+        assert!(
+            ancre.len() >= 2,
+            "une seule ancre livrée : un roulement la rendrait caduque"
+        );
+        // Toute ancre par défaut de hickory doit survivre : `ancres_racine`
+        // ajoute, elle ne remplace pas.
+        let defaut = TrustAnchor::default();
+        assert!(defaut.len() >= 2);
+        for i in 0..defaut.len() {
+            assert!(
+                ancre.contains_dnskey_bytes(defaut.get(i)),
+                "ancre par défaut {i} perdue par les ancres livrées"
+            );
+        }
     }
 }

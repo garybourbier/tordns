@@ -32,7 +32,11 @@ var (
 	errDefiAbsent   = errors.New("défi non servi par le nœud")
 	errMensonge     = errors.New("réponse DNSSEC ou justesse incorrecte")
 	errIndisponible = errors.New("nœud indisponible")
-	reAdresse       = regexp.MustCompile(`^([a-z2-7]{56}\.onion|[a-zA-Z0-9.-]+:[0-9]{1,5})$`)
+	// errReference : la référence DNSSEC du contrôleur est injoignable. La
+	// faute est imputable au contrôleur, jamais au bénévole : la passe est
+	// abandonnée sans toucher un seul compteur.
+	errReference = errors.New("référence DNSSEC indisponible")
+	reAdresse    = regexp.MustCompile(`^([a-z2-7]{56}\.onion|[a-zA-Z0-9.-]+:[0-9]{1,5})$`)
 	// UNE SEULE GRAMMAIRE pour une adresse d'instance : un service caché v3. L'ancienne
 	// grammaire acceptait aussi « hôte:port », d'où deux écritures d'une même cible
 	// (contournement de la liste des évincés) et un contrôleur qui allait chercher
@@ -77,7 +81,8 @@ type candidat struct {
 	Confirme  bool                 `json:"confirme"`
 	SondesOK  int                  `json:"sondes_ok"`
 	SondesKO  int                  `json:"sondes_ko"`
-	DernierOK time.Time            `json:"dernier_ok,omitempty"` // Pour remettre les indisponibilités consécutives à zéro
+	SuiteKO   int                  `json:"echecs_consecutifs,omitempty"` // remis à zéro par un succès
+	DernierOK time.Time            `json:"dernier_ok,omitempty"`         // Pour remettre les indisponibilités consécutives à zéro
 	DernierKO time.Time            `json:"dernier_ko,omitempty"`
 	Doutes    map[string]time.Time `json:"doutes,omitempty"`
 	// Mission 28 : quota journalier décrémenté à la confirmation, pas à l'inscription
@@ -89,6 +94,7 @@ type admis struct {
 	Depuis     time.Time            `json:"depuis"`
 	SondesOK   int                  `json:"sondes_ok"`
 	SondesKO   int                  `json:"sondes_ko"`
+	SuiteKO    int                  `json:"echecs_consecutifs,omitempty"`
 	Disponible float64              `json:"disponibilite"`
 	DernierOK  time.Time            `json:"dernier_ok"`
 	Doutes     map[string]time.Time `json:"doutes,omitempty"`
@@ -348,6 +354,9 @@ func (r *registre) confirmer(adresse string) (candidat, error) {
 		return candidat{}, errors.New("inscription inconnue")
 	}
 	if !c.Confirme {
+		if r.etat.TotalJour >= r.cfg.MaxInscriptionsJour {
+			return candidat{}, errors.New("quota journalier d'inscriptions atteint")
+		}
 		// `Depuis` est MONOTONE : écrit à la seule transition vers Confirme.
 		c.Confirme = true
 		c.Depuis = r.cfg.Maintenant()
@@ -390,7 +399,7 @@ func (r *registre) sonderAvecMesures(adresse string, domaines []string) ([]strin
 		if err != nil {
 			// Mission 28 : un échec imputable au contrôleur (référence injoignable)
 			// n'altère AUCUN compteur du bénévole : la passe est abandonnée.
-			return douteux, mesures, fmt.Errorf("référence DNSSEC indisponible")
+			return douteux, mesures, errReference
 		}
 		debut := time.Now()
 		obtenu, _, err := interrogerDoH(r.cfg.Client, url, domaine)
@@ -498,6 +507,12 @@ func (r *registre) passe() (bool, error) {
 			continue
 		}
 		douteux, mesures, err := r.sonderAvecMesures(adresse, domaines)
+		if errors.Is(err, errReference) {
+			// La référence du contrôleur est tombée : les nœuds suivants seraient
+			// tous marqués à tort. Passe abandonnée, aucun compteur touché, pas
+			// même un échantillon dans les statistiques publiques.
+			return false, err
+		}
 		r.reseau.ajouterSonde(categorieCommunaute, adresse, mesures, auMoinsJoignable(mesures), maintenant)
 		r.mu.Lock()
 		if c, ok := r.etat.Candidats[adresse]; ok {
@@ -505,14 +520,12 @@ func (r *registre) passe() (bool, error) {
 				if errors.Is(err, errMensonge) {
 					// Un mensonge DNSSEC pendant la quarantaine disqualifie.
 					delete(r.etat.Candidats, adresse)
-				} else if errors.Is(err, errIndisponible) {
-					// Mission 28 : un échec imputable au contrôleur n'altère AUCUN compteur.
-					// On ne fait rien, la passe pour ce nœud est abandonnée silencieusement.
 				} else {
+					// Nœud injoignable ou réponse inexploitable : échec du bénévole,
+					// pas du contrôleur (errReference est traité plus haut).
 					c.SondesKO++
+					c.SuiteKO++
 					c.DernierKO = maintenant
-					// Mission 28 : les indisponibilités « consécutives » se remettent à zéro après un succès.
-					// Si on n'a jamais eu de succès (DernierOK.IsZero()), on garde le comportement existant.
 					if c.DernierOK.IsZero() {
 						c.Depuis = maintenant
 						c.SondesOK = 0
@@ -528,6 +541,7 @@ func (r *registre) passe() (bool, error) {
 			} else {
 				c.SondesOK++
 				c.DernierOK = maintenant
+				c.SuiteKO = 0
 				if maintenant.Sub(c.Depuis) >= r.cfg.Quarantaine && c.SondesOK >= r.cfg.SondesMin {
 					delete(r.etat.Candidats, adresse)
 					r.etat.Admis[adresse] = &admis{
@@ -543,17 +557,16 @@ func (r *registre) passe() (bool, error) {
 		} else if a, ok := r.etat.Admis[adresse]; ok {
 			total := a.SondesOK + a.SondesKO
 			if err != nil {
-				if errors.Is(err, errIndisponible) {
-					// Mission 28 : un échec imputable au contrôleur n'altère AUCUN compteur.
-					// On ne fait rien.
-				} else {
-					a.SondesKO++
-					if errors.Is(err, errMensonge) && a.SondesKO >= r.cfg.EchecsMax ||
-						errors.Is(err, errIndisponible) && a.SondesKO >= r.cfg.IndispoMax {
-						delete(r.etat.Admis, adresse)
-						r.etat.Evinces[adresse] = maintenant
-						change = true
-					}
+				// Nœud injoignable (IndispoMax) ou menteur (EchecsMax) : on compte
+				// les échecs CONSÉCUTIFS, remis à zéro par le moindre succès. La
+				// référence tombée, elle, a déjà abandonné la passe plus haut.
+				a.SondesKO++
+				a.SuiteKO++
+				if errors.Is(err, errMensonge) && a.SuiteKO >= r.cfg.EchecsMax ||
+					errors.Is(err, errIndisponible) && a.SuiteKO >= r.cfg.IndispoMax {
+					delete(r.etat.Admis, adresse)
+					r.etat.Evinces[adresse] = maintenant
+					change = true
 				}
 			} else if len(douteux) > 0 {
 				a.Doutes = ajouterDoutes(a.Doutes, douteux, maintenant)
@@ -565,7 +578,8 @@ func (r *registre) passe() (bool, error) {
 			} else {
 				a.SondesOK++
 				a.DernierOK = maintenant
-				// Mission 28 : remise à zéro des indisponibilités consécutives après un succès
+				// Remise à zéro des indisponibilités consécutives après un succès.
+				a.SuiteKO = 0
 			}
 			if t := a.SondesOK + a.SondesKO; t > 0 {
 				a.Disponible = float64(a.SondesOK) / float64(t)
@@ -584,8 +598,10 @@ func (r *registre) passe() (bool, error) {
 	r.mu.Unlock()
 	for _, adresse := range coeur {
 		_, mesures, err := r.sonderAvecMesures(adresse, domaines)
+		if errors.Is(err, errReference) {
+			break
+		}
 		r.reseau.ajouterSonde(categorieCoeur, adresse, mesures, auMoinsJoignable(mesures), maintenant)
-		_ = err
 	}
 	r.mu.Lock()
 	err := r.enregistrer()

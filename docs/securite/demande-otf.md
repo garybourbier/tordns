@@ -19,7 +19,7 @@ service addresses.
 - Version: 0.8.0.
 - Licence: free software (see `LICENSE`).
 - Languages: Go (client relay, registry, tools), Rust (Windows client, Android
-  Arti), Kotlin (Android), Swift (iOS, in progress), shell and YAML (packaging,
+  Arti), Java (Android), Swift (iOS, in progress), shell and YAML (packaging,
   CI, node installer), JavaScript (LuCI page).
 
 ## Users and impact

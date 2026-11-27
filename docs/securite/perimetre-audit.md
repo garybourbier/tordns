@@ -19,7 +19,7 @@
 | Nœud (Tor, Caddy, page d'état, installeur, compose) | `noeud/` | sh, Docker |
 | Registre et admission des bénévoles | `controleur/registre/` | Go |
 | Contrôleur et Onionbalance | `controleur/` | Docker, sh |
-| Client Android (VPN, DNS privé, Arti) | `client-android/` | Kotlin, Rust |
+| Client Android (VPN, DNS privé, Arti) | `client-android/` | Java, Rust |
 | Client macOS | `client-macos/` | Go, sh |
 | Client Windows | `client-windows/` | Rust |
 | Paquet OpenWrt (procd, UCI, nftables, LuCI) | `client-openwrt/` | sh, JS |
