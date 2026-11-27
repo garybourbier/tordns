@@ -826,6 +826,17 @@ Une entrée par mission : fait, reste, demandé à qui.
   `TestQuotaJournalierALaConfirmation`,
   `TestRetentionPurgeCandidatsEtEvinces`,
   `TestSondeIdentifiantDNSAleatoire`. Couverture du paquet : 68,7 % → **70,8 %**.
+- **Preuve instable corrigée** : `verifier-m12.sh` « falsifiait » la signature du
+  manifeste en écrivant `0x01` sur son premier octet. Une fois sur 256, cet
+  octet valait déjà `0x01` : la signature restait intacte et le test échouait
+  sur un vérificateur sain (observé le 27/11). L'octet est maintenant remplacé
+  par son complément, donc toujours différent, et la longueur attendue
+  (64 octets bruts) est vérifiée.
+- **Limite NSEC3 figée par un test** : `nxdomain_nsec3_seul_refuse`
+  (`client-windows/src/dnssec.rs`) encode un NXDOMAIN dont la seule preuve est
+  un NSEC3 signé et exige le refus. La limite passe ainsi du commentaire à une
+  assertion : le jour où la validation acceptera NSEC3, le test échouera et la
+  limite devra être levée dans `nxdomain_prouve`, `nodata_prouve` et les docs.
 - **Docs** : `Kotlin` → `Java` dans le périmètre d'audit et la demande OTF ;
   `docs/missions/00-lire-moi.md` liste la mission 28 et son état ;
   `docs/a-faire-gary.md` regroupe les actions externes ;
@@ -840,7 +851,7 @@ Une entrée par mission : fait, reste, demandé à qui.
   étapes passe.
 - **Vérifié** : `go test ./...` dans `client-linux` (tous les paquets),
   `go test ./...` dans `controleur/registre`, `cargo test --locked` dans
-  `client-windows` (**55 tests**), `client-android/scripts/tester.sh`
+  `client-windows` (**56 tests**), `client-android/scripts/tester.sh`
   (**33 vérifications DNSSEC**, 33 locales), `scripts/ci/lint.sh` code 0,
   `scripts/verifier-m28.sh` code 0.
 - **NON PROUVÉ** :

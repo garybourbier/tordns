@@ -69,7 +69,9 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
   preuves NSEC. Un NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est
   refusé (SERVFAIL) plutôt qu'accepté sans preuve. C'est conservateur, mais
   une partie des zones signées de l'Internet utilise NSEC3 ; aucun nom n'est
-  mal résolu, ces réponses échouent. (journal, mission 28)
+  mal résolu, ces réponses échouent. Le refus est figé par le test
+  `nxdomain_nsec3_seul_refuse` (`client-windows/src/dnssec.rs`).
+  (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)
 - **Android** : l'APK n'est pas signé par une clé de production dans les

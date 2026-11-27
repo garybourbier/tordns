@@ -107,7 +107,20 @@ if "$RACINE/outils/manifeste-rust/target/debug/verifier" \
     echec "rejeu de la version 2 accepté"
 fi
 cp "$TMP/sortie/manifeste.json.sig" "$TMP/sig-fausse"
-printf '\001' | dd of="$TMP/sig-fausse" bs=1 seek=0 conv=notrunc status=none
+# Le premier octet est REMPLACÉ par son complément : écrire une valeur fixe
+# (0x01) ne modifiait rien une fois sur 256, et le test passait alors sur une
+# signature intacte (observé le 27/11).
+python3 - "$TMP/sig-fausse" <<'PY'
+import sys
+
+chemin = sys.argv[1]
+with open(chemin, "rb") as f:
+    donnees = bytearray(f.read())
+assert len(donnees) == 64, "signature de longueur inattendue"
+donnees[0] ^= 0xFF
+with open(chemin, "wb") as f:
+    f.write(donnees)
+PY
 if "$RACINE/outils/manifeste-rust/target/debug/verifier" \
     "$TMP/sortie/manifeste.json" "$TMP/sig-fausse" "$CLE" 0 >/dev/null 2>&1; then
     echec "signature altérée acceptée"

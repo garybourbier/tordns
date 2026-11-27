@@ -898,6 +898,24 @@ mod tests {
         assert_eq!(classer(valider(h, question(&present), ancre)), "reject");
     }
 
+    /// Limite connue (`docs/securite/problemes-connus.md`) : hickory 0.24 ne
+    /// valide que les négations NSEC, et `nxdomain_prouve`/`nodata_prouve`
+    /// n'acceptent qu'un NSEC. Un NXDOMAIN dont la seule preuve est un NSEC3
+    /// signé reste donc refusé : le client renvoie SERVFAIL au lieu du nom
+    /// inexistant, jamais une réponse acceptée sans preuve vérifiée. Ce test
+    /// fige la limite : le jour où la validation acceptera NSEC3, il échouera
+    /// et il faudra la lever dans les deux fonctions et dans les docs.
+    #[test]
+    fn nxdomain_nsec3_seul_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let nsec3 = nsec3_rr("example.test.", &absent, false, false);
+        h.dns_reponse = message_negatif(&absent, ResponseCode::NXDomain, nsec3, &h.zone, &signer)
+            .to_vec()
+            .unwrap();
+        assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
+    }
+
     /// Les signatures d'une réponse négative passent aussi par le contrôle
     /// d'horloge : une preuve archivée et rejouée est refusée.
     #[test]
