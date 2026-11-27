@@ -894,7 +894,8 @@ Une entrée par mission : fait, reste, demandé à qui.
   fermé). Nouveau test `zone_non_signee_sous_parent_nsec3_refusee`, et le
   vecteur commun `unsigned_zone_nsec3_opt_out` déclare désormais `reject` côté
   Windows : il annonçait `accept_unsigned` sur la seule fonction
-  `est_zone_non_signee`, pas sur le chemin réel.
+  `est_zone_non_signee`, pas sur le chemin réel. **Levé le 28/11/2026** :
+  `delegation_nsec3` vérifie la preuve lui-même, voir plus bas.
 - **Vérifié** : `cargo test --locked` dans `client-windows` (**60 tests**,
   dont 3 nouveaux de bout en bout et un de refus NSEC3).
 - **NON PROUVÉ** :
