@@ -158,7 +158,8 @@ admission/éviction, manifeste signé.
   nœuds et les clients refusent une signature fausse, un rejeu ou une empreinte
   différente, et reviennent à la version précédente en cas d’échec.
 - **DNSSEC** est validé côté client, pas seulement par le nœud ; le nœud reste
-  une source non fiable pour les zones non signées.
+  une source non fiable pour les zones non signées. Calendrier racine et
+  rotation des ancres : [docs/calendrier-racine.md](docs/calendrier-racine.md).
 
 ## Sécurité
 
@@ -173,12 +174,14 @@ signées. TorDNS ne rend pas à lui seul la navigation anonyme.
 [journal des missions](docs/missions/journal.md)) : compilations Linux, Windows,
 Android et macOS croisées ; tests Go/Rust/Java ; cache et TTL négatif ; 10 000
 paquets hostiles par client ; signature et refus de manifeste ; retour arrière
-des mises à jour ; release locale avec `SHA256SUMS` ; site sans URL hors
-GitHub ; captures 360/1280 px.
+des mises à jour ; chaîne DNSSEC réelle côté Linux (nom signé accepté, nom
+cassé refusé, zone non signée reconnue) ; release locale avec `SHA256SUMS` ;
+site sans URL hors GitHub ; captures 360/1280 px.
 
 **Ce qui n’est pas prouvé ici** : installation et service réels sur Windows,
 lancement macOS/`launchd`/`networksetup`, session `PackageInstaller` Android,
-DNSSEC contre les racines réelles, transport Tor des mises à jour, registre
+DNSSEC contre les racines réelles côté Windows et Android (Linux est prouvé),
+transport Tor des mises à jour et du diagnostic DNSSEC, registre
 avec de vrais bénévoles, publication Onionbalance sur plusieurs hôtes,
 signature Developer ID/notarisation, exécution réelle des workflows GitHub et
 des attestations. Aucun audit indépendant n’a été réalisé.

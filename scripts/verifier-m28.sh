@@ -115,34 +115,61 @@ grep -r "time.Nanosecond" "$RACINE/controleur/registre/registre_test.go" &&
     echec "time.Nanosecond encore présent dans les tests"
 ok "Plus de time.Nanosecond pour la quarantaine dans les tests"
 
-# Vérifier diagnostic DNSSEC réel (Linux)
-grep -q "diagnostic" "$RACINE/client-linux/main.go" ||
-    echec "flag --diagnostic absent client Linux"
-ok "Diagnostic DNSSEC présent (client Linux --diagnostic, client Windows --diagnostic, Android intent diagnostic)"
+# Diagnostic DNSSEC réel : outil compilé, requête DO/A testée hors ligne.
+[ -f "$RACINE/client-linux/cmd/verifier-dnssec/main.go" ] ||
+    echec "outil tordns-verifier-dnssec absent"
+(cd "$RACINE/client-linux" && go vet ./cmd/verifier-dnssec) || echec "go vet verifier-dnssec"
+(cd "$RACINE/client-linux" && go test -count=1 ./relais -run '^TestValiderNom' 2>&1) |
+    grep -q "^ok" || echec "test hors ligne du diagnostic DNSSEC"
+ok "Diagnostic DNSSEC : requête A avec bit DO, refus d'un nom invalide (hors ligne)"
+
+# Le réseau n'est pas exigé par défaut : la preuve réelle du 27/11/2026 est au
+# journal. Relancer avec TORDNS_M28_RESEAU=1 pour la refaire maintenant.
+if [ "${TORDNS_M28_RESEAU:-}" = "1" ]; then
+    (cd "$RACINE/client-linux" && go run ./cmd/verifier-dnssec \
+        -doh https://cloudflare-dns.com/dns-query cloudflare.com 2>&1) |
+        grep -q "accepté DNSSEC" || echec "nom signé réel non accepté"
+    if (cd "$RACINE/client-linux" && go run ./cmd/verifier-dnssec \
+        -doh https://cloudflare-dns.com/dns-query dnssec-failed.org 2>&1); then
+        echec "nom cassé réel accepté"
+    fi
+    (cd "$RACINE/client-linux" && go run ./cmd/verifier-dnssec \
+        -doh https://cloudflare-dns.com/dns-query google.com 2>&1) |
+        grep -q "zone non signée" || echec "zone non signée réelle non reconnue"
+    ok "Diagnostic réseau : nom signé accepté, nom cassé refusé, zone non signée reconnue"
+else
+    ok "Diagnostic réseau non relancé (TORDNS_M28_RESEAU=1 pour l'exiger) ; preuve du 27/11/2026 au journal"
+fi
 
 section "6. Textes alignés au code (vérifications de cohérence)"
-# Le README ne promet que ce que le code tient
-grep -q "réponse du nœud n'est jamais relayée\|la réponse du nœud n'est jamais relayée" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "promesse non relayée absente de la doc"
-grep -q "aucune corrélation temporelle\|indisponibilités.*consécutives.*remis.*à zéro" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "promesse indisponibilités consécutives absente"
-grep -q "zone non signée acceptée\|non signée acceptée" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "promesse zone non signée absente"
-ok "Textes (mission 28) promettent ce que le code tient"
+# Les promesses doivent être dans la doc utilisateur, pas dans la mission.
+grep -q "réponse du nœud n'est jamais" "$RACINE/client-linux/README.md" ||
+    echec "promesse « réponse jamais relayée » absente du README client Linux"
+grep -q "délégation sans DS" "$RACINE/client-linux/README.md" ||
+    echec "promesse « délégation sans DS » absente du README client Linux"
+grep -q "zone non signée" "$RACINE/client-linux/README.md" ||
+    echec "promesse « zone non signée » absente du README client Linux"
+# Le diagnostic réel est cité là où l'utilisateur le cherche.
+grep -q "tordns-verifier-dnssec" "$RACINE/client-linux/README.md" ||
+    echec "diagnostic DNSSEC absent du README client Linux"
+# Ce qui n'est pas prouvé ne doit pas être présenté comme prouvé : seuls
+# Windows et Android restent non prouvés contre la racine réelle.
+grep -q "DNSSEC contre les racines réelles côté Windows et Android" "$RACINE/README.md" ||
+    echec "README : limites DNSSEC réelles non explicitées"
+ok "README et README client Linux promettent ce que le code tient"
 
-section "7. Calendrier racine et livraison ancre via manifeste"
-# Vérifier chaque composant sur les lignes concernées (le texte est sur plusieurs lignes)
-grep -q "KSK-2017" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "KSK-2017 absent"
-grep -q "11/01/2027" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "date 11/01/2027 absente"
-grep -q "KSK-2024" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "KSK-2024 absent"
-grep -q "11/10/2026" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "date 11/10/2026 absente"
-grep -q "manifeste\|manifest" "$RACINE/docs/missions/28-durcissement-validation.md" ||
-    echec "livraison ancre par manifeste absente"
-ok "Calendrier racine (KSK-2017 11/01/2027, KSK-2024 22/03/2027) et livraison ancre via manifeste documentés"
+section "7. Calendrier racine et livraison d'une ancre"
+DOC="$RACINE/docs/calendrier-racine.md"
+[ -f "$DOC" ] || echec "docs/calendrier-racine.md absent"
+for attendu in "KSK-2017" "11/01/2027" "22/03/2027" "KSK-2024" "11/10/2026" \
+                "38696" "20326" "manifeste"; do
+    grep -qF -- "$attendu" "$DOC" || echec "calendrier racine : « $attendu » absent"
+done
+# Les ancres sont compilées : le document doit le dire, pas promettre une
+# livraison à chaud que le manifeste ne permet pas.
+grep -q "pas de mise à jour d'ancre" "$DOC" ||
+    echec "calendrier racine : absence de livraison à chaud non dite"
+ok "Calendrier racine documenté (11/01/2027, 22/03/2027) et livraison par release signée, sans ancre dans le manifeste"
 
 section "8. Rejeu des missions 10, 11, 12, 19"
 for mission in 10 11 12 19; do
@@ -160,9 +187,10 @@ done
 section "9. Bilan"
 printf '%s\n' \
     'Toutes les preuves exécutables de la mission 28 sont passées.' \
-    'NON PROUVÉ : validation DNSSEC contre de vrais domaines signés sur Internet ;' \
-    'rotation d'\''ancre racine sur un parc réel (nécessite un manifeste signé) ;' \
+    'Diagnostic DNSSEC réel (Linux) : exécuté le 27/11/2026 via DoH direct, voir le journal.' \
+    'NON PROUVÉ : DNSSEC contre la racine réelle côté Windows et Android ;' \
+    'rotation d'\''ancre racine sur un parc réel (livrée par une release signée, pas par le manifeste) ;' \
     'comportement de vrais nœuds bénévoles sous charge ;' \
-    'transport Tor des requêtes DNSSEC (les tests utilisent HTTP direct).'
+    'transport Tor du diagnostic DNSSEC (il utilise HTTPS direct).'
 
 echo "code=0"

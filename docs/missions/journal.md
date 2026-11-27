@@ -725,3 +725,46 @@ Une entrée par mission : fait, reste, demandé à qui.
   `signed_zone_valid`, `expired_signature` et `signature_by_wrong_zone`
   (aujourd'hui `n/a`) et une validation des réponses négatives côté Windows et
   Android.
+
+## Mission 28 — points 5 à 7 : diagnostic réel, textes, calendrier racine (27/11/2026)
+
+- **Le diagnostic DNSSEC n'existait pas** : l'étape 5 du vérificateur se
+  contentait de chercher `diagnostic` dans `client-linux/main.go`, or ce drapeau
+  inspecte les fuites DNS (resolv.conf, DoH des navigateurs) et n'envoie aucune
+  requête. La preuve annonçait donc un diagnostic DNSSEC qui n'était pas écrit.
+- **`tordns-verifier-dnssec` ajouté** (`client-linux/cmd/verifier-dnssec`) :
+  interroge un nom en A avec le bit DO via un résolveur DoH choisi, puis
+  applique la même chaîne que le relais (`relais.ValiderNom`, ancres IANA
+  compilées, DS/DNSKEY, RRSIG, preuves de négation). Trois verdicts : accepté,
+  zone non signée (délégation sans DS), refusé avec le motif. Le nom est envoyé
+  au résolveur DoH indiqué : outil d'audit, pas le chemin du client (TorDNS
+  résout via Tor), et aucun nom n'est journalisé par l'outil.
+- **Preuve réelle du 27/11/2026** (`-doh https://cloudflare-dns.com/dns-query`) :
+  `cloudflare.com` → accepté DNSSEC ; `dnssec-failed.org` → REFUSÉ (aucune
+  DNSKEY ne correspond au DS) ; `google.com` → zone non signée reconnue. La
+  même preuve est rejouable par `TORDNS_M28_RESEAU=1 scripts/verifier-m28.sh`.
+- **Tests hors ligne** : `TestValiderNomPoseDOEtDemandeA` (question A, bit DO,
+  erreur de transport propagée) et `TestValiderNomRefuseNomInvalide` (le
+  transport n'est pas appelé). `go test ./...` vert dans `client-linux`.
+- **Calendrier racine (point 7)** : `docs/calendrier-racine.md` documente
+  KSK-2024 (38696, active depuis le 11/10/2026), KSK-2017 (20326, révoquée le
+  11/01/2027, retirée le 22/03/2027), l'emplacement des ancres dans les trois
+  clients et la livraison réelle : une nouvelle ancre arrive par une **release
+  signée** (binaires), pas par le manifeste — celui-ci ne porte aucun champ
+  d'ancre. Une rotation doit donc être livrée avant le retrait de l'ancienne.
+- **Textes (point 6)** : le README racine et `client-linux/README.md` citent le
+  diagnostic, la rotation et les limites exactes ; la ligne « DNSSEC contre les
+  racines réelles » des preuves manquantes vaut désormais pour Windows et
+  Android seulement. La mention précédente « validation DNSSEC contre de vrais
+  domaines signés » est donc levée pour Linux et reste au journal pour le reste.
+- **Vérificateur** : les étapes 5 à 7 ne lisent plus le fichier de mission. Elles
+  compilent l'outil, exécutent son test hors ligne, vérifient les promesses dans
+  les README utilisateur et le contenu de `docs/calendrier-racine.md` (dates,
+  tags, absence de livraison à chaud). Le réseau reste optionnel pour ne pas
+  rendre la preuve dépendante d'un tiers.
+- **Vérifié** : `scripts/ci/lint.sh` code 0 ; `scripts/verifier-m28.sh` code 0
+  avec et sans `TORDNS_M28_RESEAU=1` ; `go test ./...` et `go vet ./...` verts
+  dans `client-linux`.
+- **NON PROUVÉ** : DNSSEC contre la racine réelle côté Windows et Android ;
+  rotation d'ancre sur un parc réel ; diagnostic à travers Tor (les essais
+  passent par HTTPS direct) ; le manifeste ne transporte toujours pas d'ancre.

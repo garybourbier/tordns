@@ -212,6 +212,17 @@ NSEC3 opt-out). La chaîne ne suit que les vraies délégations : l'absence de D
 sur un simple nom d'hôte ne fait plus passer la zone pour non signée. Une
 preuve absente ou qui annonce le type demandé est refusée.
 
+Le diagnostic `tordns-verifier-dnssec` valide un nom réel avec cette même
+chaîne, contre les ancres IANA, via un résolveur DoH choisi :
+
+```sh
+go run ./cmd/verifier-dnssec -doh https://cloudflare-dns.com/dns-query cloudflare.com
+```
+
+Le nom est envoyé à ce résolveur : c'est un outil d'audit, pas le chemin du
+client. Calendrier racine (KSK-2017 révoquée le 11/01/2027, KSK-2024 active) et
+livraison d'une ancre : [../docs/calendrier-racine.md](../docs/calendrier-racine.md).
+
 L'adresse n'est plus seulement `-onion` : le client lit le dernier
 `manifeste.json` vérifié déposé par `tordns-client-maj` dans
 `/var/lib/tordns/maj/`. Le réglage `TORDNS_MODE_ADRESSE` vaut `coeur` (défaut),
@@ -229,12 +240,12 @@ TORDNS_ONION=<adresse de secours>
 ## Limites
 
 - DNSSEC est validé avec `github.com/miekg/dns` ; la chaîne complète et le
-  rejet d'une adresse altérée sont testés hors ligne. Aucun échange avec les
-  serveurs racine réels n'est exécuté dans les tests.
-- Les preuves de négation NSEC/NSEC3 sont testées avec des fixtures signées
-  en mémoire, y compris NSEC3 opt-out ; aucun échange avec les racines ou les
-  zones réelles n'est exécuté. Une zone non signée reste acceptée en mode
-  `auto`.
+  rejet d'une adresse altérée sont testés hors ligne sur des fixtures signées
+  en mémoire, y compris NSEC3 opt-out. Le diagnostic `tordns-verifier-dnssec`
+  a validé de vrais noms (signé, cassé, non signé) contre la racine réelle via
+  DoH direct ; le même diagnostic à travers Tor n'est pas prouvé.
+- Une zone non signée reste acceptée en mode `auto` : l'absence de DS est
+  prouvée par NSEC/NSEC3, jamais supposée.
 - Le cache est volatil (perdu au redémarrage) et non partagé entre instances.
 - Le port 53 de cette machine de test n'est pas ouvrable sans privilège : la
   preuve locale utilise 15353 (5353 est occupé par Avahi/KDE Connect).
