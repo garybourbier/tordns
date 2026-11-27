@@ -15,10 +15,9 @@ use std::sync::Arc;
 use futures::stream::{self, Stream};
 use hickory_proto::error::ProtoError;
 use hickory_proto::op::Message;
-use hickory_proto::rr::dnssec::rdata::DNSSECRData;
-use hickory_proto::rr::dnssec::rdata::NSEC3;
-use hickory_proto::rr::dnssec::{Algorithm, PublicKeyEnum, TrustAnchor};
-use hickory_proto::rr::{Name, RData, Record, RecordType};
+use hickory_proto::rr::dnssec::rdata::{DNSSECRData, DNSKEY, NSEC3};
+use hickory_proto::rr::dnssec::{Algorithm, PublicKeyEnum, TrustAnchor, Verifier};
+use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_proto::xfer::{DnsHandle, DnsRequest, DnsResponse, DnssecDnsHandle};
 
 use crate::doh::ClientDoh;
@@ -128,7 +127,7 @@ enum Delegation {
     Signee,
     /// NSEC du parent au nom de l'enfant, annonçant NS mais pas DS : zone non signée.
     SansDs,
-    /// Rien de concluant (nom ordinaire, NSEC3 que hickory 0.24 ne valide pas...).
+    /// Rien de concluant (nom ordinaire, preuve absente ou invalide...).
     Indetermine,
 }
 
@@ -147,7 +146,9 @@ where
     let mut flux = nœud.send(DnsRequest::from(requete));
     let reponse = match futures::executor::block_on(futures::StreamExt::next(&mut flux)) {
         Some(Ok(reponse)) => reponse.into_message(),
-        _ => return Delegation::Indetermine,
+        // hickory refuse la réponse négative NSEC3 (ou n'a rien retenu) : on
+        // retente la preuve NSEC3 dans la réponse brute, vérifiée ici.
+        _ => return delegation_nsec3(handle, ancre, nom),
     };
     if reponse
         .answers()
@@ -156,6 +157,9 @@ where
     {
         return Delegation::Signee;
     }
+    // hickory 0.24 ne valide aucune négation NSEC3 : la preuve d'absence de DS
+    // d'un parent signé en NSEC3 n'arrive jamais jusqu'ici. Elle est vérifiée
+    // dans `delegation_nsec3`, ou rien n'est conclu.
     let nsec = reponse.name_servers().iter().find_map(|rr| {
         if rr.record_type() != RecordType::NSEC || !rr.name().eq_case(nom) {
             return None;
@@ -172,7 +176,205 @@ where
         {
             Delegation::SansDs
         }
-        _ => Delegation::Indetermine,
+        _ => delegation_nsec3(handle, ancre, nom),
+    }
+}
+
+/// Absence de DS d'une délégation prouvée par un NSEC3 du parent.
+///
+/// hickory 0.24 refuse (ou vide) toute réponse négative NSEC3, donc la preuve
+/// n'arrive ni dans le message validé ni comme erreur exploitable. On la relit
+/// alors dans la réponse brute, MAIS on ne la croit que si deux conditions
+/// indépendantes tombent juste :
+///
+/// 1. son RRSIG est valide, vérifié ici avec la DNSKEY de la zone signataire
+///    (elle-même validée par la chaîne d'ancres de hickory) ;
+/// 2. elle couvre bien le nom sous RFC 5155 : NSEC3 au nom de la délégation
+///    annonçant NS sans DS, ou NSEC3 opt-out couvrant l'empreinte du nom.
+///
+/// Toute étape manquante rend `Indetermine` : la réponse non signée reste
+/// refusée. La zone signataire doit être le parent direct du nom — une preuve
+/// rendue par une zone plus haute ne dit rien du DS de cette délégation.
+fn delegation_nsec3<H>(handle: &H, ancre: &TrustAnchor, nom: &Name) -> Delegation
+where
+    H: DnsHandle<Error = ProtoError> + Clone + 'static,
+{
+    let mut requete = Message::new();
+    requete.add_query(hickory_proto::op::Query::query(nom.clone(), RecordType::DS));
+    requete.set_recursion_desired(true);
+    let brut = match reponse_brute(handle, requete) {
+        Some(message) => message,
+        None => return Delegation::Indetermine,
+    };
+
+    // Zone signataire : la plus proche ancêtre du nom qui a signé un NSEC3.
+    let zone = brut
+        .answers()
+        .iter()
+        .chain(brut.name_servers().iter())
+        .filter_map(|rr| {
+            rr.data()
+                .and_then(RData::as_dnssec)
+                .and_then(DNSSECRData::as_rrsig)
+        })
+        .filter(|sig| sig.type_covered() == RecordType::NSEC3 && sig.signer_name().zone_of(nom))
+        .map(|sig| sig.signer_name().clone())
+        .max_by_key(Name::num_labels);
+    let zone = match zone {
+        Some(zone) if nom.num_labels() == zone.num_labels() + 1 => zone,
+        _ => return Delegation::Indetermine,
+    };
+
+    let cles = cles_zone(handle, ancre, &zone);
+    if cles.is_empty() {
+        return Delegation::Indetermine;
+    }
+    let preuves = nsec3_signees(&brut, &zone, &cles, maintenant_unix());
+
+    // NSEC3 au nom même de la délégation : le bitmap doit annoncer NS (pas
+    // SOA, qui serait l'apex de la zone) et pas DS.
+    for (proprietaire, nsec3) in &preuves {
+        if nsec3_correspond(nsec3, proprietaire, nom) {
+            if nsec3.type_bit_maps().contains(&RecordType::DS) {
+                // Le parent annonce un DS que sa réponse ne porte pas :
+                // incohérence, donc rien n'est prouvé.
+                return Delegation::Indetermine;
+            }
+            if nsec3.type_bit_maps().contains(&RecordType::NS)
+                && !nsec3.type_bit_maps().contains(&RecordType::SOA)
+            {
+                return Delegation::SansDs;
+            }
+            return Delegation::Indetermine;
+        }
+    }
+    // RFC 5155 § 8.6 : un NSEC3 opt-out qui couvre l'empreinte du nom prouve
+    // une délégation non signée, dont le parent n'a pas publié le DS.
+    for (proprietaire, nsec3) in &preuves {
+        if nsec3.opt_out() && nsec3_couvre(nsec3, proprietaire, nom).unwrap_or(false) {
+            return Delegation::SansDs;
+        }
+    }
+    Delegation::Indetermine
+}
+
+/// Réponse brute (non validée) à `requete`, ou `None` si le nœud n'a rien rendu.
+fn reponse_brute<H>(handle: &H, requete: Message) -> Option<Message>
+where
+    H: DnsHandle<Error = ProtoError> + Clone + 'static,
+{
+    let mut flux = handle.clone().send(DnsRequest::from(requete));
+    let reponse = futures::executor::block_on(futures::StreamExt::next(&mut flux))?;
+    reponse.ok().map(DnsResponse::into_message)
+}
+
+/// DNSKEY de `zone` lues par la chaîne d'ancres de hickory : une clé n'entre ici
+/// que si le RRset DNSKEY a été validé jusqu'à une ancre racine.
+fn cles_zone<H>(handle: &H, ancre: &TrustAnchor, zone: &Name) -> Vec<DNSKEY>
+where
+    H: DnsHandle<Error = ProtoError> + Clone + 'static,
+{
+    let mut requete = Message::new();
+    requete.add_query(hickory_proto::op::Query::query(
+        zone.clone(),
+        RecordType::DNSKEY,
+    ));
+    requete.set_recursion_desired(true);
+    let nœud = DnssecDnsHandle::with_trust_anchor(handle.clone(), ancre.clone());
+    let mut flux = nœud.send(DnsRequest::from(requete));
+    let reponse = match futures::executor::block_on(futures::StreamExt::next(&mut flux)) {
+        Some(Ok(reponse)) => reponse.into_message(),
+        _ => return Vec::new(),
+    };
+    reponse
+        .answers()
+        .iter()
+        .filter(|rr| rr.record_type() == RecordType::DNSKEY && rr.name().eq_case(zone))
+        .filter_map(|rr| {
+            rr.data()
+                .and_then(RData::as_dnssec)
+                .and_then(DNSSECRData::as_dnskey)
+                .cloned()
+        })
+        .collect()
+}
+
+/// NSEC3 de `brut` dont le RRSIG a été vérifié par une DNSKEY de `zone` et qui
+/// est encore dans sa période de validité. Un RRset sans signature valide est
+/// ignoré : il ne peut donc pas fabriquer une preuve.
+fn nsec3_signees(
+    brut: &Message,
+    zone: &Name,
+    cles: &[DNSKEY],
+    maintenant: i64,
+) -> Vec<(Name, NSEC3)> {
+    let tous: Vec<&Record> = brut
+        .answers()
+        .iter()
+        .chain(brut.name_servers().iter())
+        .collect();
+    let mut sortie: Vec<(Name, NSEC3)> = Vec::new();
+    for sig_rr in &tous {
+        let sig = match sig_rr
+            .data()
+            .and_then(RData::as_dnssec)
+            .and_then(DNSSECRData::as_rrsig)
+        {
+            Some(sig) => sig,
+            None => continue,
+        };
+        if sig.type_covered() != RecordType::NSEC3 || !sig.signer_name().eq_case(zone) {
+            continue;
+        }
+        if sortie.iter().any(|(n, _)| n.eq_case(sig_rr.name())) {
+            continue;
+        }
+        let rrset: Vec<Record> = tous
+            .iter()
+            .filter(|rr| rr.record_type() == RecordType::NSEC3 && rr.name().eq_case(sig_rr.name()))
+            .map(|rr| (*rr).clone())
+            .collect();
+        if rrset.is_empty() {
+            continue;
+        }
+        let debut = sig.sig_inception() as i64;
+        let fin = sig.sig_expiration() as i64;
+        if maintenant + DERIVE_HORLOGE_S < debut || maintenant - DERIVE_HORLOGE_S > fin {
+            continue;
+        }
+        let verifiee = cles.iter().any(|cle| {
+            cle.calculate_key_tag()
+                .is_ok_and(|tag| tag == sig.key_tag())
+                && cle.algorithm() == sig.algorithm()
+                && cle
+                    .verify_rrsig(sig_rr.name(), DNSClass::IN, sig, &rrset)
+                    .is_ok()
+        });
+        if !verifiee {
+            continue;
+        }
+        for rr in &rrset {
+            if let Some(nsec3) = rr
+                .data()
+                .and_then(RData::as_dnssec)
+                .and_then(DNSSECRData::as_nsec3)
+            {
+                sortie.push((rr.name().clone(), nsec3.clone()));
+            }
+        }
+    }
+    sortie
+}
+
+/// Vrai si l'empreinte NSEC3 de `nom` est exactement le propriétaire de
+/// l'enregistrement (le nom existe dans la chaîne NSEC3).
+fn nsec3_correspond(nsec3: &NSEC3, proprietaire: &Name, nom: &Name) -> bool {
+    let empreinte = nsec3
+        .hash_algorithm()
+        .hash(nsec3.salt(), nom, nsec3.iterations());
+    match empreinte {
+        Ok(octets) => base32hex(octets.as_ref()) == premier_label(proprietaire),
+        Err(_) => false,
     }
 }
 
@@ -864,8 +1066,9 @@ mod tests {
         }
     }
 
-    /// Même cas avec une preuve NSEC3 opt-out : hickory 0.24 ne valide aucune
-    /// négation NSEC3, la preuve n'arrive jamais et le chemin complet refuse.
+    /// Même cas avec une preuve NSEC3 : hickory 0.24 ne valide aucune négation
+    /// NSEC3 ; `delegation_nsec3` vérifie la preuve et le chemin complet
+    /// accepte la délégation non signée.
     fn verdict_zone_non_signee_nsec3() -> &'static str {
         let (h, ancre, enfant) = parent_fixture(true, false, true);
         if valider(h, question(&enfant), ancre).is_ok() {
@@ -993,6 +1196,51 @@ mod tests {
                 ),
             )),
         )
+    }
+
+    const NSEC3_SEL: [u8; 2] = [0xAB, 0xCD];
+
+    fn nsec3_empreinte(nom: &Name) -> Vec<u8> {
+        use hickory_proto::rr::dnssec::Nsec3HashAlgorithm;
+        Nsec3HashAlgorithm::SHA1
+            .hash(&NSEC3_SEL, nom, 0)
+            .unwrap()
+            .as_ref()
+            .to_vec()
+    }
+
+    fn nsec3_preuve(
+        zone: &Name,
+        proprietaire: &str,
+        suivant: Vec<u8>,
+        opt_out: bool,
+        types: &[RecordType],
+    ) -> Record {
+        use hickory_proto::rr::dnssec::Nsec3HashAlgorithm;
+        Record::from_rdata(
+            Name::parse(&format!("{proprietaire}.{}", zone.to_ascii()), None).unwrap(),
+            300,
+            RData::DNSSEC(DNSSECRData::NSEC3(NSEC3::new(
+                Nsec3HashAlgorithm::SHA1,
+                opt_out,
+                0,
+                NSEC3_SEL.to_vec(),
+                suivant,
+                types.to_vec(),
+            ))),
+        )
+    }
+
+    /// NSEC3 au nom même de `nom` (le nom existe dans la chaîne NSEC3).
+    fn nsec3_au_nom(zone: &Name, nom: &Name, opt_out: bool, types: &[RecordType]) -> Record {
+        let empreinte = nsec3_empreinte(nom);
+        nsec3_preuve(zone, &base32hex(&empreinte), empreinte, opt_out, types)
+    }
+
+    /// NSEC3 qui couvre l'empreinte de `nom` sans être au nom : propriétaire
+    /// « 000…0 », suivant l'empreinte du nom.
+    fn nsec3_couvrant(zone: &Name, nom: &Name, opt_out: bool, types: &[RecordType]) -> Record {
+        nsec3_preuve(zone, &"0".repeat(32), nsec3_empreinte(nom), opt_out, types)
     }
 
     fn message_autorite(rr: Record) -> Message {
@@ -1323,26 +1571,7 @@ mod tests {
     ) -> (HandleParent, TrustAnchor, Name) {
         let zone = Name::parse("example.test.", None).unwrap();
         let enfant = Name::parse("unsigned.example.test.", None).unwrap();
-        let rng = ring::rand::SystemRandom::new();
-        let graine = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
-        let privee = ring::signature::Ed25519KeyPair::from_pkcs8(graine.as_ref()).unwrap();
-        let cle = KeyPair::from_ed25519(privee);
-        let signer = SigSigner::dnssec(
-            cle.to_dnskey(Algorithm::ED25519).unwrap(),
-            cle,
-            zone.clone(),
-            std::time::Duration::from_secs(3600),
-        );
-        let dnskey = signer.to_dnskey().unwrap();
-        let dnskey_rr = Record::from_rdata(
-            zone.clone(),
-            3600,
-            RData::DNSSEC(DNSSECRData::DNSKEY(dnskey.clone())),
-        );
-        let mut m_dnskey = Message::new();
-        m_dnskey.add_query(Query::query(zone.clone(), RecordType::DNSKEY));
-        m_dnskey.add_answer(dnskey_rr.clone());
-        m_dnskey.add_answer(record_signe(&zone, vec![dnskey_rr], &signer));
+        let (signer, dnskey, m_dnskey) = parent_materiel(&zone);
 
         let soa = Record::from_rdata(
             zone.clone(),
@@ -1390,7 +1619,7 @@ mod tests {
                 maintenant() + 3600,
             ));
         } else if nsec3 {
-            let preuve = nsec3_rr("example.test.", &enfant, true, false);
+            let preuve = nsec3_au_nom(&zone, &enfant, true, &[RecordType::NS]);
             let nom_preuve = preuve.name().clone();
             m_ds.add_name_server(preuve.clone());
             m_ds.add_name_server(record_signe_par(
@@ -1466,6 +1695,136 @@ mod tests {
         )
     }
 
+    /// Matériel de signature d'une zone parente de test : la clé, la DNSKEY
+    /// publiée et le message DNSKEY signé que le handle sert à hickory.
+    fn parent_materiel(zone: &Name) -> (SigSigner, DNSKEY, Message) {
+        let rng = ring::rand::SystemRandom::new();
+        let graine = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let privee = ring::signature::Ed25519KeyPair::from_pkcs8(graine.as_ref()).unwrap();
+        let cle = KeyPair::from_ed25519(privee);
+        let signer = SigSigner::dnssec(
+            cle.to_dnskey(Algorithm::ED25519).unwrap(),
+            cle,
+            zone.clone(),
+            std::time::Duration::from_secs(3600),
+        );
+        let dnskey = signer.to_dnskey().unwrap();
+        let dnskey_rr = Record::from_rdata(
+            zone.clone(),
+            3600,
+            RData::DNSSEC(DNSSECRData::DNSKEY(dnskey.clone())),
+        );
+        let mut m_dnskey = Message::new();
+        m_dnskey.add_query(Query::query(zone.clone(), RecordType::DNSKEY));
+        m_dnskey.add_answer(dnskey_rr.clone());
+        m_dnskey.add_answer(record_signe(zone, vec![dnskey_rr], &signer));
+        (signer, dnskey, m_dnskey)
+    }
+
+    /// Quelle clé signe la preuve NSEC3 d'une variante de test.
+    enum SignaturePreuve {
+        /// Clé du parent, signataire = parent : la preuve est authentique.
+        Zone,
+        /// Clé neuve jamais publiée dans la DNSKEY : signature invérifiable.
+        AutreCle,
+        /// Clé du parent, mais période de validité entièrement passée.
+        Perimee,
+    }
+
+    /// Parent signé dont la réponse DS porte exactement `preuve` (et rien
+    /// d'autre), signée selon `signature`. Sert à prouver que le chemin NSEC3
+    /// refuse une preuve non authentifiée.
+    fn parent_nsec3_variante(
+        preuve: Record,
+        signature: SignaturePreuve,
+    ) -> (HandleParent, TrustAnchor, Name) {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let enfant = Name::parse("unsigned.example.test.", None).unwrap();
+        let (signer, dnskey, m_dnskey) = parent_materiel(&zone);
+
+        let soa = Record::from_rdata(
+            zone.clone(),
+            300,
+            RData::SOA(SOA::new(
+                Name::parse("ns.example.test.", None).unwrap(),
+                Name::parse("hostmaster.example.test.", None).unwrap(),
+                1,
+                3600,
+                600,
+                86400,
+                300,
+            )),
+        );
+        let mut m_ds = Message::new();
+        m_ds.set_response_code(ResponseCode::NoError);
+        m_ds.add_query(Query::query(enfant.clone(), RecordType::DS));
+        m_ds.add_name_server(soa.clone());
+        m_ds.add_name_server(record_signe_par(
+            &zone,
+            &zone,
+            vec![soa],
+            &signer,
+            maintenant() - 60,
+            maintenant() + 3600,
+        ));
+        let nom_preuve = preuve.name().clone();
+        m_ds.add_name_server(preuve.clone());
+        let signature_rr = match signature {
+            SignaturePreuve::Zone => record_signe_par(
+                &nom_preuve,
+                &zone,
+                vec![preuve],
+                &signer,
+                maintenant() - 60,
+                maintenant() + 3600,
+            ),
+            SignaturePreuve::AutreCle => {
+                let (autre, _, _) = parent_materiel(&zone);
+                record_signe_par(
+                    &nom_preuve,
+                    &zone,
+                    vec![preuve],
+                    &autre,
+                    maintenant() - 60,
+                    maintenant() + 3600,
+                )
+            }
+            SignaturePreuve::Perimee => record_signe_par(
+                &nom_preuve,
+                &zone,
+                vec![preuve],
+                &signer,
+                maintenant() - 20_000,
+                maintenant() - 10_000,
+            ),
+        };
+        m_ds.add_name_server(signature_rr);
+
+        let a = Record::from_rdata(
+            enfant.clone(),
+            60,
+            RData::A(hickory_proto::rr::rdata::A::new(192, 0, 2, 7)),
+        );
+        let mut m_a = Message::new();
+        m_a.add_query(Query::query(enfant.clone(), RecordType::A));
+        m_a.add_answer(a);
+
+        let publique =
+            PublicKeyEnum::from_public_bytes(dnskey.public_key(), Algorithm::ED25519).unwrap();
+        let mut ancre = TrustAnchor::new();
+        ancre.insert_trust_anchor(&publique);
+        (
+            HandleParent {
+                dnskey: m_dnskey.to_vec().unwrap(),
+                ds: m_ds.to_vec().unwrap(),
+                a: m_a.to_vec().unwrap(),
+                alias: Vec::new(),
+            },
+            ancre,
+            enfant,
+        )
+    }
+
     #[test]
     fn zone_non_signee_prouvee_acceptee_de_bout_en_bout() {
         let (h, ancre, enfant) = parent_fixture(true, false, false);
@@ -1532,16 +1891,80 @@ mod tests {
         assert_eq!(classer(valider(h, question(&enfant), ancre)), "reject");
     }
 
-    /// Une zone non signée sous un parent NSEC3 reste refusée de bout en bout :
-    /// hickory 0.24 ne valide aucune négation NSEC3, donc la preuve d'absence de
-    /// DS n'arrive jamais. `est_zone_non_signee` saurait la lire (test
-    /// ci-dessus) ; le chemin complet échoue fermé. Ce test fige la limite :
-    /// le jour où hickory validera NSEC3, il faudra le retourner et lever la
-    /// limite dans les docs.
+    /// Zone non signée sous un parent signé en NSEC3 : hickory 0.24 ne valide
+    /// aucune négation NSEC3, la preuve n'arrive donc jamais par lui. Elle est
+    /// relue dans la réponse brute et vérifiée ici (RRSIG du parent, NSEC3 au
+    /// nom de la délégation annonçant NS sans DS) : la réponse non signée est
+    /// servie. Sans cette vérification, le refus de hickory restait.
     #[test]
-    fn zone_non_signee_sous_parent_nsec3_refusee() {
+    fn zone_non_signee_sous_parent_nsec3_acceptee() {
         let (h, ancre, enfant) = parent_fixture(true, false, true);
+        let sortie = valider(h, question(&enfant), ancre).expect("zone non signée NSEC3 refusée");
+        let m = Message::from_vec(&sortie).unwrap();
+        assert!(
+            m.answers().iter().any(|rr| matches!(
+                rr.data(),
+                Some(RData::A(a)) if a.0 == std::net::Ipv4Addr::new(192, 0, 2, 7)
+            )),
+            "la réponse de la zone non signée n'est pas servie"
+        );
+    }
+
+    /// NSEC3 opt-out qui ne fait que couvrir l'empreinte du nom (délégation
+    /// absente de la chaîne NSEC3) : RFC 5155 § 8.6, délégation non signée.
+    #[test]
+    fn nsec3_opt_out_couvrant_accepte() {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let preuve = nsec3_couvrant(&zone, &nom, true, &[RecordType::NS]);
+        let (h, ancre, enfant) = parent_nsec3_variante(preuve, SignaturePreuve::Zone);
+        assert_eq!(delegation(&h, &ancre, &enfant), Delegation::SansDs);
+        valider(h, question(&enfant), ancre).expect("délégation couverte par NSEC3 refusée");
+    }
+
+    /// NSEC3 couvrant sans le drapeau opt-out : rien ne prouve une délégation,
+    /// la réponse non signée reste refusée.
+    #[test]
+    fn nsec3_couvrant_sans_opt_out_refuse() {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let preuve = nsec3_couvrant(&zone, &nom, false, &[RecordType::NS]);
+        let (h, ancre, enfant) = parent_nsec3_variante(preuve, SignaturePreuve::Zone);
+        assert_eq!(delegation(&h, &ancre, &enfant), Delegation::Indetermine);
         assert_eq!(classer(valider(h, question(&enfant), ancre)), "reject");
+    }
+
+    /// NSEC3 au nom de la délégation mais annonçant DS : le parent contredit sa
+    /// réponse, rien n'est prouvé.
+    #[test]
+    fn nsec3_annoncant_ds_pour_une_delegation_refuse() {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let preuve = nsec3_au_nom(&zone, &nom, true, &[RecordType::NS, RecordType::DS]);
+        let (h, ancre, enfant) = parent_nsec3_variante(preuve, SignaturePreuve::Zone);
+        assert_eq!(delegation(&h, &ancre, &enfant), Delegation::Indetermine);
+    }
+
+    /// Preuve bien formée mais signée par une clé que la DNSKEY validée ne
+    /// publie pas : signature invérifiable, refus.
+    #[test]
+    fn nsec3_a_signature_invalide_refuse() {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let preuve = nsec3_au_nom(&zone, &nom, true, &[RecordType::NS]);
+        let (h, ancre, enfant) = parent_nsec3_variante(preuve, SignaturePreuve::AutreCle);
+        assert_eq!(delegation(&h, &ancre, &enfant), Delegation::Indetermine);
+    }
+
+    /// Preuve authentique mais archivée : rejouée après expiration, elle est
+    /// refusée, comme toute signature hors de sa période.
+    #[test]
+    fn nsec3_a_signature_perimee_refuse() {
+        let zone = Name::parse("example.test.", None).unwrap();
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let preuve = nsec3_au_nom(&zone, &nom, true, &[RecordType::NS]);
+        let (h, ancre, enfant) = parent_nsec3_variante(preuve, SignaturePreuve::Perimee);
+        assert_eq!(delegation(&h, &ancre, &enfant), Delegation::Indetermine);
     }
 
     #[test]

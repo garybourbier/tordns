@@ -65,17 +65,18 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
 
 - **Windows** : installation réelle, redémarrage et ACL NTFS non prouvés hors
   Windows (Wine n'a pas d'ACL NTFS). (journal, missions 12 et 13)
-- **Windows, NSEC3** : hickory 0.24 ne valide que les preuves NSEC. Un
-  NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est refusé (SERVFAIL),
-  et une zone non signée déléguée par un parent NSEC3 aussi : la preuve
-  d'absence de DS n'arrive jamais. C'est conservateur, mais une partie des
-  zones de l'Internet utilise NSEC3 ; aucun nom n'est mal résolu, ces réponses
-  échouent. Le refus est figé par les tests `nxdomain_nsec3_seul_refuse` et
-  `zone_non_signee_sous_parent_nsec3_refusee`
+- **Windows, réponses négatives NSEC3** : hickory 0.24 ne valide que les
+  preuves NSEC. Un NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est
+  donc refusé (SERVFAIL) : c'est conservateur, aucun nom n'est mal résolu,
+  mais ces réponses échouent. La preuve d'absence de DS d'une délégation, elle,
+  est vérifiée par le client lui-même (`delegation_nsec3` : RRSIG contrôlé
+  avec la DNSKEY validée par la chaîne d'ancres, puis couverture RFC 5155),
+  donc une zone non signée sous un parent NSEC3 est servie. Le refus des
+  négatifs reste figé par `nxdomain_nsec3_seul_refuse`
   (`client-windows/src/dnssec.rs`). (journal, mission 28)
-- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC,
-  y compris la cible d'un CNAME (`completer_zone_non_signee`), est testée hors
-  ligne ; elle n'a pas encore été exercée contre une vraie racine
+- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC ou
+  NSEC3, y compris la cible d'un CNAME (`completer_zone_non_signee`), est
+  testée hors ligne ; elle n'a pas encore été exercée contre une vraie racine
   (`google.com` par exemple). (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)

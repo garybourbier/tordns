@@ -935,8 +935,57 @@ Une entrée par mission : fait, reste, demandé à qui.
   (**62 tests**), `scripts/ci/lint.sh` code 0.
 - **NON PROUVÉ** : la chaîne CNAME contre de vrais domaines signés et non
   signés (fixtures seulement) ; une cible sous parent NSEC3 reste refusée, comme
-  toute zone non signée déléguée en NSEC3 (limite hickory) ; une chaîne de
-  plusieurs CNAME n'est couverte que tant que chaque cible est prouvée zone par
-  zone — aucune limite de profondeur n'est nécessaire ici puisque chaque
-  maillon est validé indépendamment, mais aucun cas réel à trois maillons n'a
-  été essayé.
+  toute zone non signée déléguée en NSEC3 (limite hickory, corrigée le
+  28/11 ci-dessous) ; une chaîne de plusieurs CNAME n'est couverte que tant que
+  chaque cible est prouvée zone par zone — aucune limite de profondeur n'est
+  nécessaire ici puisque chaque maillon est validé indépendamment, mais aucun
+  cas réel à trois maillons n'a été essayé.
+
+## Mission 28 — preuve d'absence de DS par NSEC3 côté Windows (28/11/2026)
+
+- **Défaut** : hickory 0.24 ne valide aucune négation NSEC3 (« As of now, only
+  NSEC is supported »), et `delegation` ne lisait la preuve d'absence de DS que
+  dans le message validé. Conséquence qui n'était pas un cas de bord : pour
+  toute zone non signée déléguée par un parent signé en NSEC3 — l'immense
+  majorité des zones sous `.com`, par exemple — `accepter_non_signee` remontait
+  les labels, trouvait un DS chez le grand-parent et refusait. Toutes ces zones
+  finissaient en SERVFAIL.
+- **Correctif** (`delegation_nsec3`) : quand hickory refuse la réponse DS (ou
+  n'en retient aucune preuve), la réponse brute est relue et la preuve NSEC3
+  n'est crue que si elle passe deux contrôles indépendants :
+  1. la zone signataire est le plus proche ancêtre du nom qui a signé un NSEC3,
+     et le nom est un **enfant direct** de cette zone (une preuve rendue par une
+     zone plus haute ne dit rien de ce DS) ;
+  2. le RRSIG du NSEC3 est vérifié ici, avec une DNSKEY de cette zone que
+     hickory a validée jusqu'à une ancre racine (`cles_zone`), horloge et
+     numéro de clé compris. Un RRset sans signature valide est ignoré.
+  Puis, RFC 5155 : NSEC3 au nom de la délégation annonçant NS sans SOA ni DS →
+  `SansDs` ; sinon NSEC3 opt-out couvrant l'empreinte du nom → `SansDs`.
+  Tout le reste (signature invérifiable ou périmée, bitmap annonçant DS,
+  couverture sans opt-out, NSEC3 absent) rend `Indetermine` : le refus de
+  hickory est conservé. Rien n'est accepté sans preuve authentifiée.
+- **Tests** : `zone_non_signee_sous_parent_nsec3_acceptee` (flip de l'ancien
+  test de refus, de bout en bout : l'adresse 192.0.2.7 est bien servie),
+  `nsec3_opt_out_couvrant_accepte` (délégation absente de la chaîne NSEC3,
+  couverte par un opt-out), et quatre refus : `nsec3_couvrant_sans_opt_out_refuse`,
+  `nsec3_annoncant_ds_pour_une_delegation_refuse`,
+  `nsec3_a_signature_invalide_refuse` (clé jamais publiée),
+  `nsec3_a_signature_perimee_refuse`. **Non-vacuité vérifiée** : en neutralisant
+  les deux appels à `delegation_nsec3`, les deux tests d'acceptation échouent
+  et les refus passent toujours ; fichier restauré ensuite.
+- **Vecteurs communs** : `testvectors/dnssec_vectors.json` passe en version 4,
+  `unsigned_zone_nsec3_opt_out` déclare `accept_unsigned` côté Windows (comme
+  Linux) ; Android reste `reject`, écart assumé et décrit.
+- **Vérifié** : `cargo test --locked --offline` dans `client-windows`
+  (**67 tests**), `scripts/ci/lint.sh` code 0, `scripts/verifier-m28.sh` code 0.
+- **NON PROUVÉ** :
+  - aucun essai contre une vraie racine : la preuve NSEC3 n'a été exercée que
+    sur des fixtures signées en mémoire ;
+  - les réponses **négatives** NSEC3 (NXDOMAIN/NODATA dans une zone signée en
+    NSEC3) restent refusées : `nxdomain_nsec3_seul_refuse` n'est pas levé,
+    faute d'avoir validé ici la preuve à trois NSEC3 (plus proche enclos,
+    nom suivant, wildcard) ;
+  - les paramètres NSEC3 (sel, itérations) ne sont pas confrontés d'un
+    enregistrement à l'autre : chaque preuve est vérifiée indépendamment, ce
+    qui ne peut pas affaiblir la validation mais ne détecte pas une zone
+    incohérente.

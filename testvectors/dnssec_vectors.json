@@ -1,6 +1,6 @@
 {
   "description": "Cas de conformité DNSSEC communs aux trois validateurs. Chaque cas nomme une situation et le verdict attendu sur chaque plateforme ; les fixtures cryptographiques sont construites par la suite de tests de chaque langage (les clés de test ne sont pas partagées). Les trois suites lisent ce fichier et ÉCHOUENT si un cas applicable n'a pas de fixture, ou si le verdict observé diffère.",
-  "version": 3,
+  "version": 4,
   "verdicts": ["accept", "accept_unsigned", "reject"],
   "vectors": [
     {
@@ -34,10 +34,10 @@
       "expected_verdict": "accept_unsigned",
       "plateformes": {
         "linux": "accept_unsigned",
-        "windows": "reject",
+        "windows": "accept_unsigned",
         "android": "reject"
       },
-      "divergence": "Android refuse toute zone non signée. Windows refuse celle-ci : hickory 0.24 ne valide aucune négation NSEC3, donc la preuve d'absence de DS n'arrive jamais et le chemin complet échoue fermé (SERVFAIL), alors que son contrôle de preuve saurait lire un NSEC3 opt-out (test unitaire). Linux accepte le NSEC3 opt-out validé. Différence de bibliothèque, pas d'acceptation sans preuve."
+      "divergence": "Android refuse toute zone non signée. Linux et Windows acceptent le NSEC3 opt-out VALIDÉ : hickory 0.24 ne valide aucune négation NSEC3, donc Windows vérifie lui-même le RRSIG du parent avec la DNSKEY validée par la chaîne d'ancres, puis applique la couverture RFC 5155 (NSEC3 au nom de la délégation annonçant NS sans DS, ou NSEC3 opt-out couvrant l'empreinte). Une signature invérifiable, périmée ou un bitmap annonçant DS laissent le refus."
     },
     {
       "name": "forged_address_in_signed_zone",

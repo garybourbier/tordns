@@ -76,14 +76,17 @@ brouillon, puis Gary publie.
 
 Ordre : 19 → 14 → 15 → 16 → 17 → 18 → 20 → 21 → 22 → 23 → 24 → 25 → 26 → 27.
 
-## État au 27/11/2026
+## État au 28/11/2026
 
 - Missions 14 à 27 : livrées, avec les preuves et les « NON PROUVÉ » de
   `journal.md`. Les restes qui dépendent de Gary (matériel, macOS, F-Droid,
   `makensis`) sont regroupés dans `docs/a-faire-gary.md`.
 - Mission 28 : points 1 à 7 traités (ancres KSK-2017 et KSK-2024, preuve
   NSEC/NSEC3 des zones non signées, vecteurs communs aux trois validateurs,
-  diagnostic DNSSEC réel, calendrier racine). Restent couverts par des tests
-  hors ligne mais non prouvés en conditions réelles : voir le journal.
+  diagnostic DNSSEC réel, calendrier racine). Windows vérifie lui-même la
+  preuve NSEC3 d'absence de DS (signature avec la DNSKEY validée, couverture
+  RFC 5155) ; ses réponses négatives NSEC3 restent refusées. Restent couverts
+  par des tests hors ligne mais non prouvés en conditions réelles : voir le
+  journal.
 - Aucun tag n'est posé : `noeud/VERSION` vaut 0.8.0 et la publication est un
   acte de Gary (`docs/checklist-release-0.8.0.md`).
