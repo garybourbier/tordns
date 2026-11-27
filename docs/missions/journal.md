@@ -903,5 +903,40 @@ Une entrée par mission : fait, reste, demandé à qui.
     essayer avant diffusion ;
   - NSEC3 sous le parent, donc une partie des zones non signées réelles, reste
     en SERVFAIL côté Windows (limite hickory, figée par test) ;
-  - une réponse non signée atteinte par CNAME depuis une zone signée est encore
-    refusée : le chemin DS porte sur le nom demandé, pas sur la cible.
+  - une réponse non signée atteinte par CNAME depuis une zone signée était
+    encore refusée : le chemin DS portait sur le nom demandé, pas sur la cible
+    (corrigé ci-dessous).
+
+## Mission 28 — CNAME d'une zone signée vers une zone non signée (27/11/2026)
+
+- **Défaut** : quand une zone signée répond par un CNAME vers une zone non
+  signée, hickory valide le CNAME puis retire du message l'enregistrement de la
+  cible, qui n'a aucune signature à vérifier. Le message restait accepté mais
+  ne portait plus que le CNAME : l'adresse demandée disparaissait, et un
+  client qui ne suit pas lui-même la chaîne ne recevait rien d'utile. Le chemin
+  de secours `accepter_non_signee` ne s'appliquait pas, hickory n'ayant pas
+  renvoyé d'erreur.
+- **Correctif** (`completer_zone_non_signee`) : après `controler`, les
+  enregistrements de la section réponse présents dans le message brut mais
+  retirés du message validé sont repris **uniquement** si la zone de leur nom
+  n'a pas de DS, prouvé par le même `delegation` (DS du parent, NSEC NS-sans-DS)
+  que pour une réponse non signée directe. Un DS (zone signée) ou une preuve
+  indéterminée fait échouer la requête : la donnée retirée n'est jamais rendue
+  sans preuve. Seule la section réponse est reprise, jamais les RRSIG ni les
+  sections autorité/additionnelle.
+- **Tests** : `cname_vers_zone_non_signee_complete_la_reponse` (CNAME signé +
+  adresse non signée de la cible : les deux sont rendus) et
+  `cname_vers_zone_signee_refuse` (le parent sert un DS pour la cible : refus).
+  **Non-vacuité vérifiée** : en neutralisant l'appel à
+  `completer_zone_non_signee`, les deux tests échouent (le premier sur
+  l'adresse absente, le second parce que la réponse creuse était acceptée) ;
+  fichier restauré ensuite.
+- **Vérifié** : `cargo test --locked --offline` dans `client-windows`
+  (**62 tests**), `scripts/ci/lint.sh` code 0.
+- **NON PROUVÉ** : la chaîne CNAME contre de vrais domaines signés et non
+  signés (fixtures seulement) ; une cible sous parent NSEC3 reste refusée, comme
+  toute zone non signée déléguée en NSEC3 (limite hickory) ; une chaîne de
+  plusieurs CNAME n'est couverte que tant que chaque cible est prouvée zone par
+  zone — aucune limite de profondeur n'est nécessaire ici puisque chaque
+  maillon est validé indépendamment, mais aucun cas réel à trois maillons n'a
+  été essayé.

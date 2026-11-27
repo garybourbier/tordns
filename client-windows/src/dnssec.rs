@@ -18,7 +18,7 @@ use hickory_proto::op::Message;
 use hickory_proto::rr::dnssec::rdata::DNSSECRData;
 use hickory_proto::rr::dnssec::rdata::NSEC3;
 use hickory_proto::rr::dnssec::{Algorithm, PublicKeyEnum, TrustAnchor};
-use hickory_proto::rr::{Name, RData, RecordType};
+use hickory_proto::rr::{Name, RData, Record, RecordType};
 use hickory_proto::xfer::{DnsHandle, DnsRequest, DnsResponse, DnssecDnsHandle};
 
 use crate::doh::ClientDoh;
@@ -112,8 +112,12 @@ where
     // LE MESSAGE VALIDÉ, JAMAIS LE BUFFER. hickory retire du message les RRset qui
     // n'ont pas vérifié mais garde le buffer d'origine intact : `into_buffer()`
     // relayait donc la réponse du nœud sans filtrage (relecture du 24/11, point 4a).
-    let valide = reponse.into_message();
+    let mut valide = reponse.into_message();
     controler(&question, &valide, &brut, maintenant_unix())?;
+    // Une réponse d'une zone signée peut porter, après un CNAME, les
+    // enregistrements d'une zone non signée : hickory les a retirés faute de
+    // signature à vérifier. Ils ne reviennent que sur preuve d'absence de DS.
+    completer_zone_non_signee(&handle, &ancre, &brut, &mut valide)?;
     valide.to_vec().map_err(|e| e.to_string())
 }
 
@@ -237,6 +241,78 @@ where
         return Err("réponse non signée vide".to_string());
     }
     sortie.to_vec().map_err(|e| e.to_string())
+}
+
+/// Remet dans le message validé les réponses que hickory a retirées parce
+/// qu'elles n'ont aucune signature à vérifier — typiquement l'enregistrement
+/// d'une zone non signée atteint par un CNAME depuis une zone signée.
+///
+/// Rien n'est remis sans la même preuve que `accepter_non_signee` : l'absence de
+/// DS de la zone de l'enregistrement est demandée au parent par le validateur.
+/// Un DS (zone signée) ou une preuve indéterminée laisse le filtrage de hickory
+/// intact : la réponse reste amputée, jamais complétée par une donnée non
+/// prouvée. Seule la section réponse est reprise ; les RRSIG ne sont jamais
+/// recopiés.
+fn completer_zone_non_signee<H>(
+    handle: &H,
+    ancre: &TrustAnchor,
+    brut: &Message,
+    valide: &mut Message,
+) -> Result<(), String>
+where
+    H: DnsHandle<Error = ProtoError> + Clone + 'static,
+{
+    let mut retires: Vec<Record> = Vec::new();
+    for rr in brut.answers() {
+        if rr.record_type() == RecordType::RRSIG {
+            continue;
+        }
+        let retenu = valide
+            .answers()
+            .iter()
+            .any(|v| v.record_type() == rr.record_type() && v.name().eq_case(rr.name()));
+        let deja = retires
+            .iter()
+            .any(|d| d.record_type() == rr.record_type() && d.name().eq_case(rr.name()));
+        if !retenu && !deja {
+            retires.push(rr.clone());
+        }
+    }
+    if retires.is_empty() {
+        return Ok(());
+    }
+
+    for rr in retires {
+        let nom = rr.name().clone();
+        let mut zone = None;
+        let mut courant = nom.clone();
+        while !courant.is_root() {
+            match delegation(handle, ancre, &courant) {
+                Delegation::Signee => {
+                    return Err("réponse non signée dans une zone signée".to_string())
+                }
+                Delegation::SansDs => {
+                    zone = Some(courant);
+                    break;
+                }
+                Delegation::Indetermine => {}
+            }
+            courant = courant.base_name();
+        }
+        let zone =
+            zone.ok_or_else(|| "réponse non signée sans preuve d'absence de DS".to_string())?;
+        for brut_rr in brut.answers() {
+            if brut_rr.record_type() == RecordType::RRSIG
+                || brut_rr.record_type() != rr.record_type()
+                || !brut_rr.name().eq_case(&nom)
+                || !zone.zone_of(brut_rr.name())
+            {
+                continue;
+            }
+            valide.add_answer(brut_rr.clone());
+        }
+    }
+    Ok(())
 }
 
 /// Vérifie si la réponse correspond à une zone non signée (délégation sans DS prouvée
@@ -1207,6 +1283,9 @@ mod tests {
         dnskey: Vec<u8>,
         ds: Vec<u8>,
         a: Vec<u8>,
+        /// CNAME signé de `alias.example.test.` vers `unsigned.example.test.`,
+        /// suivi de l'adresse NON signée de la cible.
+        alias: Vec<u8>,
     }
 
     impl DnsHandle for HandleParent {
@@ -1216,11 +1295,16 @@ mod tests {
         fn send<R: Into<DnsRequest> + Unpin + Send + 'static>(&self, request: R) -> Self::Response {
             let q = request.into();
             let question = q.queries().first().cloned().unwrap();
-            let brut = match question.query_type() {
-                RecordType::DNSKEY => self.dnskey.clone(),
-                RecordType::DS => self.ds.clone(),
-                RecordType::A => self.a.clone(),
-                _ => Vec::new(),
+            let alias = Name::parse("alias.example.test.", None).unwrap();
+            let brut = if question.name().eq_case(&alias) {
+                self.alias.clone()
+            } else {
+                match question.query_type() {
+                    RecordType::DNSKEY => self.dnskey.clone(),
+                    RecordType::DS => self.ds.clone(),
+                    RecordType::A => self.a.clone(),
+                    _ => Vec::new(),
+                }
             };
             let resultat = Message::from_vec(&brut)
                 .map_err(ProtoError::from)
@@ -1342,7 +1426,29 @@ mod tests {
         );
         let mut m_a = Message::new();
         m_a.add_query(Query::query(enfant.clone(), RecordType::A));
-        m_a.add_answer(a);
+        m_a.add_answer(a.clone());
+
+        // Réponse d'une zone SIGNÉE : un CNAME signé vers la zone non signée,
+        // accompagné de l'adresse non signée de la cible (ce que fait un
+        // résolveur récursif).
+        let alias = Name::parse("alias.example.test.", None).unwrap();
+        let cname = Record::from_rdata(
+            alias.clone(),
+            60,
+            RData::CNAME(hickory_proto::rr::rdata::CNAME(enfant.clone())),
+        );
+        let mut m_alias = Message::new();
+        m_alias.add_query(Query::query(alias.clone(), RecordType::A));
+        m_alias.add_answer(cname.clone());
+        m_alias.add_answer(record_signe_par(
+            &alias,
+            &zone,
+            vec![cname],
+            &signer,
+            maintenant() - 60,
+            maintenant() + 3600,
+        ));
+        m_alias.add_answer(a);
 
         let publique =
             PublicKeyEnum::from_public_bytes(dnskey.public_key(), Algorithm::ED25519).unwrap();
@@ -1353,6 +1459,7 @@ mod tests {
                 dnskey: m_dnskey.to_vec().unwrap(),
                 ds: m_ds.to_vec().unwrap(),
                 a: m_a.to_vec().unwrap(),
+                alias: m_alias.to_vec().unwrap(),
             },
             ancre,
             enfant,
@@ -1371,6 +1478,42 @@ mod tests {
             )),
             "la réponse de la zone non signée n'est pas servie"
         );
+    }
+
+    /// CNAME signé d'une zone signée vers une zone non signée : hickory retire
+    /// du message validé l'adresse de la cible (aucune signature à vérifier).
+    /// Elle revient sur preuve d'absence de DS, et la réponse porte alors le
+    /// CNAME ET l'adresse ; sans le correctif, seul le CNAME était rendu.
+    #[test]
+    fn cname_vers_zone_non_signee_complete_la_reponse() {
+        let (h, ancre, enfant) = parent_fixture(true, false, false);
+        let alias = Name::parse("alias.example.test.", None).unwrap();
+        let sortie =
+            valider(h, question(&alias), ancre).expect("CNAME vers zone non signée refusé");
+        let m = Message::from_vec(&sortie).unwrap();
+        assert!(
+            m.answers().iter().any(|rr| matches!(
+                rr.data(),
+                Some(RData::CNAME(c)) if c.0 == enfant
+            )),
+            "le CNAME validé n'est pas rendu"
+        );
+        assert!(
+            m.answers().iter().any(|rr| matches!(
+                rr.data(),
+                Some(RData::A(a)) if a.0 == std::net::Ipv4Addr::new(192, 0, 2, 7)
+            )),
+            "l'adresse de la cible non signée n'est pas servie"
+        );
+    }
+
+    /// Même chaîne, mais le parent sert un DS pour la cible : elle est signée,
+    /// donc l'adresse non signée est une forgerie et la réponse est refusée.
+    #[test]
+    fn cname_vers_zone_signee_refuse() {
+        let (h, ancre, _) = parent_fixture(true, true, false);
+        let alias = Name::parse("alias.example.test.", None).unwrap();
+        assert_eq!(classer(valider(h, question(&alias), ancre)), "reject");
     }
 
     #[test]

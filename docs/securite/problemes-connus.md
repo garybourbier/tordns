@@ -73,8 +73,9 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
   échouent. Le refus est figé par les tests `nxdomain_nsec3_seul_refuse` et
   `zone_non_signee_sous_parent_nsec3_refusee`
   (`client-windows/src/dnssec.rs`). (journal, mission 28)
-- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC est
-  testée hors ligne ; elle n'a pas encore été exercée contre une vraie racine
+- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC,
+  y compris la cible d'un CNAME (`completer_zone_non_signee`), est testée hors
+  ligne ; elle n'a pas encore été exercée contre une vraie racine
   (`google.com` par exemple). (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)
