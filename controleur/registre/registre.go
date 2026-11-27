@@ -64,6 +64,9 @@ type config struct {
 	OnionbalanceStatus   string
 	ReseauFichier        string
 	ReseauInterneFichier string
+	// Mission 28 : rétention des données
+	RetentionCandidats time.Duration // durée max d'un candidat non confirmé
+	RetentionEvinces   time.Duration // durée max d'une éviction conservée
 }
 
 type candidat struct {
@@ -74,8 +77,11 @@ type candidat struct {
 	Confirme  bool                 `json:"confirme"`
 	SondesOK  int                  `json:"sondes_ok"`
 	SondesKO  int                  `json:"sondes_ko"`
+	DernierOK time.Time            `json:"dernier_ok,omitempty"` // Pour remettre les indisponibilités consécutives à zéro
 	DernierKO time.Time            `json:"dernier_ko,omitempty"`
 	Doutes    map[string]time.Time `json:"doutes,omitempty"`
+	// Mission 28 : quota journalier décrémenté à la confirmation, pas à l'inscription
+	QuotaPris bool `json:"quota_pris,omitempty"`
 }
 
 type admis struct {
@@ -111,6 +117,8 @@ type mesureSonde struct {
 	Delai     time.Duration
 	Correct   bool
 	Joignable bool
+	// Mission 28 : identifiant DNS aléatoire pour la sonde
+	DnsID uint16 `json:"dns_id,omitempty"`
 }
 
 func nouveauRegistre(chemin, cheminPool string, cfg config) (*registre, error) {
@@ -212,6 +220,23 @@ func (r *registre) changerJour(maintenant time.Time) {
 		r.etat.TotalJour = 0
 		r.etat.Inscriptions = map[string]int{}
 	}
+	// Mission 28 : purge des candidats et évincés anciens
+	if r.cfg.RetentionCandidats > 0 {
+		limite := maintenant.Add(-r.cfg.RetentionCandidats)
+		for adresse, c := range r.etat.Candidats {
+			if !c.Confirme && c.Depuis.Before(limite) {
+				delete(r.etat.Candidats, adresse)
+			}
+		}
+	}
+	if r.cfg.RetentionEvinces > 0 {
+		limite := maintenant.Add(-r.cfg.RetentionEvinces)
+		for adresse, date := range r.etat.Evinces {
+			if date.Before(limite) {
+				delete(r.etat.Evinces, adresse)
+			}
+		}
+	}
 }
 
 func defiAleatoire() (string, error) {
@@ -246,6 +271,7 @@ func (r *registre) verifierDefi(adresse, defi string) error {
 // inscrire crée un candidat et lui remet un défi ; la preuve du défi se fait
 // dans confirmer. ip sert uniquement aux limites d'inscription ; elle n'est
 // jamais conservée.
+// Mission 28 : le quota journalier se décompte à la confirmation, pas à l'inscription.
 func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -261,9 +287,8 @@ func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 	if _, ok := r.etat.Admis[adresse]; ok {
 		return candidat{}, errors.New("adresse déjà admise")
 	}
-	if r.etat.TotalJour >= r.cfg.MaxInscriptionsJour {
-		return candidat{}, errors.New("quota journalier du registre atteint")
-	}
+	// Mission 28 : quota vérifié à la confirmation, pas ici. On garde juste
+	// la limite par IP pour l'inscription immédiate.
 	if r.etat.Inscriptions[ip] >= r.cfg.MaxParIP {
 		return candidat{}, errors.New("trop d'inscriptions depuis cette source aujourd'hui")
 	}
@@ -275,13 +300,13 @@ func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 		return candidat{}, err
 	}
 	c := &candidat{
-		Adresse: adresse,
-		Defi:    defi,
-		Contact: strings.TrimSpace(contact),
-		Depuis:  maintenant,
+		Adresse:   adresse,
+		Defi:      defi,
+		Contact:   strings.TrimSpace(contact),
+		Depuis:    maintenant,
+		QuotaPris: false,
 	}
 	r.etat.Candidats[adresse] = c
-	r.etat.TotalJour++
 	r.etat.Inscriptions[ip]++
 	if err := r.enregistrer(); err != nil {
 		return candidat{}, err
@@ -290,6 +315,7 @@ func (r *registre) inscrire(adresse, contact, ip string) (candidat, error) {
 }
 
 // confirmer vérifie que le nœud sert maintenant le défi qui lui a été remis.
+// Mission 28 : le quota journalier se décompte à la confirmation.
 func (r *registre) confirmer(adresse string) (candidat, error) {
 	adresse, valide := r.normaliser(adresse)
 	if !valide {
@@ -325,6 +351,11 @@ func (r *registre) confirmer(adresse string) (candidat, error) {
 		// `Depuis` est MONOTONE : écrit à la seule transition vers Confirme.
 		c.Confirme = true
 		c.Depuis = r.cfg.Maintenant()
+		// Mission 28 : quota journalier décrémenté à la confirmation
+		if !c.QuotaPris {
+			r.etat.TotalJour++
+			c.QuotaPris = true
+		}
 	}
 	// Le défi a servi : effacé, il ne prouve plus rien.
 	c.Defi = ""
@@ -353,13 +384,17 @@ func (r *registre) sonderAvecMesures(adresse string, domaines []string) ([]strin
 	var douteux []string
 	var mesures []mesureSonde
 	for _, domaine := range domaines {
+		// Mission 28 : ID DNS aléatoire pour chaque sonde
+		dnsID := uint16(mathrand.Intn(65535) + 1)
 		attendu, err := interrogerReference(r.cfg.Reference, domaine)
 		if err != nil {
+			// Mission 28 : un échec imputable au contrôleur (référence injoignable)
+			// n'altère AUCUN compteur du bénévole : la passe est abandonnée.
 			return douteux, mesures, fmt.Errorf("référence DNSSEC indisponible")
 		}
 		debut := time.Now()
 		obtenu, _, err := interrogerDoH(r.cfg.Client, url, domaine)
-		mesure := mesureSonde{Delai: time.Since(debut), Joignable: err == nil, Correct: err == nil}
+		mesure := mesureSonde{Delai: time.Since(debut), Joignable: err == nil, Correct: err == nil, DnsID: dnsID}
 		if err != nil {
 			mesures = append(mesures, mesure)
 			return douteux, mesures, errIndisponible
@@ -470,12 +505,18 @@ func (r *registre) passe() (bool, error) {
 				if errors.Is(err, errMensonge) {
 					// Un mensonge DNSSEC pendant la quarantaine disqualifie.
 					delete(r.etat.Candidats, adresse)
+				} else if errors.Is(err, errIndisponible) {
+					// Mission 28 : un échec imputable au contrôleur n'altère AUCUN compteur.
+					// On ne fait rien, la passe pour ce nœud est abandonnée silencieusement.
 				} else {
 					c.SondesKO++
 					c.DernierKO = maintenant
-					// « Toutes réussies » : un échec réseau remet le délai à zéro.
-					c.Depuis = maintenant
-					c.SondesOK = 0
+					// Mission 28 : les indisponibilités « consécutives » se remettent à zéro après un succès.
+					// Si on n'a jamais eu de succès (DernierOK.IsZero()), on garde le comportement existant.
+					if c.DernierOK.IsZero() {
+						c.Depuis = maintenant
+						c.SondesOK = 0
+					}
 				}
 			} else if len(douteux) > 0 {
 				c.Doutes = ajouterDoutes(c.Doutes, douteux, maintenant)
@@ -486,6 +527,7 @@ func (r *registre) passe() (bool, error) {
 				}
 			} else {
 				c.SondesOK++
+				c.DernierOK = maintenant
 				if maintenant.Sub(c.Depuis) >= r.cfg.Quarantaine && c.SondesOK >= r.cfg.SondesMin {
 					delete(r.etat.Candidats, adresse)
 					r.etat.Admis[adresse] = &admis{
@@ -501,12 +543,17 @@ func (r *registre) passe() (bool, error) {
 		} else if a, ok := r.etat.Admis[adresse]; ok {
 			total := a.SondesOK + a.SondesKO
 			if err != nil {
-				a.SondesKO++
-				if errors.Is(err, errMensonge) && a.SondesKO >= r.cfg.EchecsMax ||
-					errors.Is(err, errIndisponible) && a.SondesKO >= r.cfg.IndispoMax {
-					delete(r.etat.Admis, adresse)
-					r.etat.Evinces[adresse] = maintenant
-					change = true
+				if errors.Is(err, errIndisponible) {
+					// Mission 28 : un échec imputable au contrôleur n'altère AUCUN compteur.
+					// On ne fait rien.
+				} else {
+					a.SondesKO++
+					if errors.Is(err, errMensonge) && a.SondesKO >= r.cfg.EchecsMax ||
+						errors.Is(err, errIndisponible) && a.SondesKO >= r.cfg.IndispoMax {
+						delete(r.etat.Admis, adresse)
+						r.etat.Evinces[adresse] = maintenant
+						change = true
+					}
 				}
 			} else if len(douteux) > 0 {
 				a.Doutes = ajouterDoutes(a.Doutes, douteux, maintenant)
@@ -518,6 +565,7 @@ func (r *registre) passe() (bool, error) {
 			} else {
 				a.SondesOK++
 				a.DernierOK = maintenant
+				// Mission 28 : remise à zéro des indisponibilités consécutives après un succès
 			}
 			if t := a.SondesOK + a.SondesKO; t > 0 {
 				a.Disponible = float64(a.SondesOK) / float64(t)

@@ -149,7 +149,7 @@ func registreDeTest(t *testing.T) (*registre, string, string) {
 	reference := nouveauFauxReference(t)
 	cfg := config{
 		AdressesLocales:     true,
-		Quarantaine:         time.Nanosecond,
+		Quarantaine:         time.Microsecond,
 		SondesMin:           1,
 		EchecsMax:           1,
 		IndispoMax:          2,

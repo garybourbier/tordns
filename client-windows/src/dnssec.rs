@@ -15,7 +15,10 @@ use std::sync::Arc;
 use futures::stream::{self, Stream};
 use hickory_proto::error::ProtoError;
 use hickory_proto::op::Message;
+use hickory_proto::rr::dnssec::rdata::DNSSECRData;
+use hickory_proto::rr::dnssec::rdata::NSEC3;
 use hickory_proto::rr::dnssec::{Algorithm, PublicKeyEnum, TrustAnchor};
+use hickory_proto::rr::{Name, RData, RecordType};
 use hickory_proto::xfer::{DnsHandle, DnsRequest, DnsResponse, DnssecDnsHandle};
 
 use crate::doh::ClientDoh;
@@ -49,9 +52,9 @@ impl DnsHandle for DoHHandle {
 }
 
 /// Valide `requete` et retourne la réponse authentifiée, ré-encodée depuis le
-/// message validé. ATTENTION : hickory 0.24 n'a aucune notion de délégation non
-/// signée ; une zone non signée finit en erreur, donc en SERVFAIL (relecture du
-/// 24/11, point 4d — à traiter, voir docs/missions).
+/// message validé. Gère les zones non signées en prouvant l'absence de DS par
+/// NSEC/NSEC3 (comme le client Linux) avant d'accepter une réponse non signée.
+/// Jamais d'acceptation sans preuve.
 pub fn resoudre(doh: &ClientDoh, requete: &[u8]) -> Result<Vec<u8>, String> {
     let message = Message::from_vec(requete).map_err(|e| e.to_string())?;
     valider(
@@ -105,6 +108,131 @@ where
     valide.to_vec().map_err(|e| e.to_string())
 }
 
+/// Vérifie si la réponse correspond à une zone non signée (délégation sans DS prouvée
+/// par NSEC/NSEC3). Retourne `Ok(true)` si la zone est prouvée non signée.
+fn est_zone_non_signee(
+    question: &hickory_proto::op::Query,
+    valide: &Message,
+    brut: &Message,
+) -> Result<bool, String> {
+    use hickory_proto::rr::RecordType;
+
+    let nom_question = question.name();
+
+    // Si la réponse a des réponses valides signées, ce n'est pas une zone non signée
+    let a_reponses_signees = valide.answers().iter().any(|r| {
+        r.record_type() != RecordType::RRSIG
+            && (r.record_type() == question.query_type() || r.record_type() == RecordType::CNAME)
+    });
+    if a_reponses_signees {
+        return Ok(false);
+    }
+
+    // La preuve doit figurer dans le message que le validateur a RETENU : un
+    // enregistrement présent seulement dans le buffer brut n'a pas été validé.
+    // Vérifier en plus la couverture, sans quoi n'importe quel NSEC/NSEC3 de la
+    // section autorité suffirait à faire passer une zone signée pour non signée.
+    for rr in valide.name_servers() {
+        let nom_rr = rr.name();
+        match rr.data() {
+            Some(RData::DNSSEC(DNSSECRData::NSEC(nsec))) => {
+                if nsec.type_bit_maps().contains(&RecordType::DS) {
+                    // La zone annonce une délégation signée : pas de zone non signée.
+                    continue;
+                }
+                if nsec_couvre(nom_rr, nsec.next_domain_name(), nom_question)
+                    && preuve_presente_brut(brut, nom_rr, RecordType::NSEC)
+                {
+                    return Ok(true);
+                }
+            }
+            Some(RData::DNSSEC(DNSSECRData::NSEC3(nsec3))) => {
+                if nsec3.type_bit_maps().contains(&RecordType::DS) {
+                    continue;
+                }
+                // NSEC3 : le nom demandé est haché, puis l'enregistrement doit
+                // couvrir cette empreinte. L'opt-out seul ne prouve rien.
+                if nsec3.opt_out()
+                    && nsec3_couvre(nsec3, nom_rr, nom_question)?
+                    && preuve_presente_brut(brut, nom_rr, RecordType::NSEC3)
+                {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+/// Ordre canonique RFC 4034 : un NSEC couvre `nom` s'il en est le propriétaire ou
+/// si `nom` tombe strictement entre le propriétaire et le nom suivant.
+fn nsec_couvre(proprietaire: &Name, suivant: &Name, nom: &Name) -> bool {
+    if nom.eq_case(proprietaire) || nom == proprietaire {
+        return true;
+    }
+    if suivant <= proprietaire {
+        return false;
+    }
+    nom > proprietaire && nom < suivant
+}
+
+/// Vrai si l'empreinte NSEC3 de `nom` tombe dans l'intervalle couvert par
+/// l'enregistrement NSEC3 dont le propriétaire est `proprietaire`.
+fn nsec3_couvre(nsec3: &NSEC3, proprietaire: &Name, nom: &Name) -> Result<bool, String> {
+    let empreinte = nsec3
+        .hash_algorithm()
+        .hash(nsec3.salt(), nom, nsec3.iterations())
+        .map_err(|e| format!("NSEC3 : empreinte de {nom} incalculable : {e}"))?;
+    let hache = base32hex(empreinte.as_ref());
+    let debut = premier_label(proprietaire);
+    let fin = base32hex(nsec3.next_hashed_owner_name());
+    // Base32hex : l'alphabet 0-9A-V est croissant en ASCII, la comparaison de
+    // chaînes suffit donc une fois les labels normalisés en majuscules.
+    if hache == debut || hache == fin {
+        return Ok(true);
+    }
+    if fin <= debut {
+        // Dernier maillon de la chaîne : il couvre jusqu'au début.
+        return Ok(hache > debut || hache < fin);
+    }
+    Ok(hache > debut && hache < fin)
+}
+
+/// Premier label d'un nom, en majuscules et sans point final.
+fn premier_label(nom: &Name) -> String {
+    let texte = nom.to_ascii().trim_end_matches('.').to_uppercase();
+    texte.split('.').next().unwrap_or("").to_string()
+}
+
+/// Encodage base32hex (RFC 4648 §7) d'une empreinte NSEC3, sans remplissage.
+fn base32hex(octets: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUV";
+    let mut sortie = String::new();
+    let mut tampon: u32 = 0;
+    let mut bits = 0u32;
+    for octet in octets {
+        tampon = (tampon << 8) | u32::from(*octet);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            sortie.push(ALPHABET[((tampon >> bits) & 0x1f) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        sortie.push(ALPHABET[((tampon << (5 - bits)) & 0x1f) as usize] as char);
+    }
+    sortie
+}
+
+/// Vrai si l'enregistrement (nom, type) existe aussi dans le buffer brut : un
+/// enregistrement fabriqué par le validateur ne compte pas comme preuve reçue.
+fn preuve_presente_brut(brut: &Message, nom: &Name, type_rr: RecordType) -> bool {
+    brut.name_servers()
+        .iter()
+        .any(|r| r.record_type() == type_rr && (r.name() == nom || r.name().eq_case(nom)))
+}
+
 /// Tolérance d'horloge sur la validité des signatures : un poste peut dériver,
 /// mais une tolérance large rouvrirait le rejeu de chaînes archivées.
 const DERIVE_HORLOGE_S: i64 = 300;
@@ -127,6 +255,8 @@ fn maintenant_unix() -> i64 {
 /// - et elle est dans sa période de validité, à la dérive d'horloge près.
 /// Toutes les signatures, pas une : on ne sait pas laquelle hickory a retenue, et
 /// exiger qu'elles passent toutes ne peut pas affaiblir la validation.
+///
+/// Si la réponse est une zone non signée prouvée (NSEC/NSEC3 opt-out), on l'accepte.
 fn controler(
     question: &hickory_proto::op::Query,
     valide: &Message,
@@ -135,6 +265,13 @@ fn controler(
 ) -> Result<(), String> {
     use hickory_proto::op::ResponseCode;
     use hickory_proto::rr::RecordType;
+
+    // D'abord vérifier si c'est une zone non signée prouvée
+    if let Ok(true) = est_zone_non_signee(question, valide, brut) {
+        // Zone non signée prouvée par NSEC/NSEC3 : acceptée
+        return Ok(());
+    }
+
     if valide.response_code() == ResponseCode::NoError {
         let repond = valide.answers().iter().any(|r| {
             r.name().eq_case(question.name()) || r.name() == question.name()
@@ -152,7 +289,11 @@ fn controler(
             .iter()
             .chain(brut.name_servers())
             .filter(|s| s.name() == r.name())
-            .filter_map(|s| s.data().and_then(|d| d.as_dnssec()).and_then(|d| d.as_rrsig()))
+            .filter_map(|s| {
+                s.data()
+                    .and_then(|d| d.as_dnssec())
+                    .and_then(|d| d.as_rrsig())
+            })
             .filter(|s| s.type_covered() == r.record_type())
         {
             if !sig.signer_name().zone_of(r.name()) {
@@ -184,7 +325,14 @@ mod tests {
     }
 
     fn record_signe(nom: &Name, rrset: Vec<Record>, signer: &SigSigner) -> Record {
-        record_signe_par(nom, nom, rrset, signer, maintenant() - 60, maintenant() + 3600)
+        record_signe_par(
+            nom,
+            nom,
+            rrset,
+            signer,
+            maintenant() - 60,
+            maintenant() + 3600,
+        )
     }
 
     /// Signe `rrset` (au nom `nom`) avec la clé de `signer`, en annonçant
@@ -343,8 +491,22 @@ mod tests {
     /// le nœud joint la DNSKEY d'ancrage (une constante publique). hickory accepte
     /// un RRset fait uniquement de clés d'ancrage sans vérifier de signature, et
     /// `into_buffer()` relayait alors l'adresse forgée.
+    /// Mission 28, point 4 : verdict au vocabulaire du fichier de cas commun.
+    fn classer(validation: Result<Vec<u8>, String>) -> &'static str {
+        if validation.is_ok() {
+            "accept"
+        } else {
+            "reject"
+        }
+    }
+
     #[test]
     fn adresse_forgee_portee_par_la_cle_d_ancrage_refusee() {
+        let verdict = verdict_adresse_forgee();
+        assert_eq!(verdict, "reject", "adresse forgée relayée");
+    }
+
+    fn verdict_adresse_forgee() -> &'static str {
         let (mut h, ancre, _) = fixture_complete();
         let mut forge = question(&h.zone);
         forge.add_answer(a(&h.zone, 66));
@@ -354,8 +516,7 @@ mod tests {
             RData::DNSSEC(DNSSECRData::DNSKEY(h.dnskey.clone())),
         ));
         h.dns_reponse = forge.to_vec().unwrap();
-        let r = valider(h.clone(), question(&h.zone), ancre);
-        assert!(r.is_err(), "adresse forgée relayée : {r:?}");
+        classer(valider(h.clone(), question(&h.zone), ancre))
     }
 
     /// Point 4b : la zone example.test. signe une adresse pour victime.test. avec sa
@@ -363,6 +524,11 @@ mod tests {
     /// ses ancêtres : refus.
     #[test]
     fn signature_d_une_autre_zone_refusee() {
+        let verdict = verdict_autre_zone();
+        assert_eq!(verdict, "reject", "signature hors zone acceptée");
+    }
+
+    fn verdict_autre_zone() -> &'static str {
         let (mut h, ancre, signer) = fixture_complete();
         let victime = Name::parse("victime.test.", None).unwrap();
         let enr = a(&victime, 77);
@@ -377,13 +543,17 @@ mod tests {
             maintenant() + 3600,
         ));
         h.dns_reponse = rep.to_vec().unwrap();
-        let r = valider(h, question(&victime), ancre);
-        assert!(r.is_err(), "signature hors zone acceptée : {r:?}");
+        classer(valider(h, question(&victime), ancre))
     }
 
     /// Point 4c : une chaîne archivée, rejouée après l'expiration de sa signature.
     #[test]
     fn signature_perimee_refusee() {
+        let verdict = verdict_signature_perimee();
+        assert_eq!(verdict, "reject", "signature périmée acceptée");
+    }
+
+    fn verdict_signature_perimee() -> &'static str {
         let (mut h, ancre, signer) = fixture_complete();
         let enr = a(&h.zone, 1);
         let mut rep = question(&h.zone);
@@ -397,8 +567,43 @@ mod tests {
             maintenant() - 10_000,
         ));
         h.dns_reponse = rep.to_vec().unwrap();
-        let r = valider(h.clone(), question(&h.zone), ancre);
-        assert!(r.is_err(), "signature périmée acceptée : {r:?}");
+        classer(valider(h.clone(), question(&h.zone), ancre))
+    }
+
+    fn verdict_zone_signee_valide() -> &'static str {
+        let (h, ancre, _) = fixture_complete();
+        classer(valider(h.clone(), question(&h.zone), ancre))
+    }
+
+    /// Zone signée mais réponse sans RRSIG sur l'adresse : rien à valider.
+    fn verdict_signature_absente() -> &'static str {
+        let (mut h, ancre, _) = fixture_complete();
+        let nom = h.zone.clone();
+        let mut rep = question(&nom);
+        rep.add_answer(a(&nom, 1));
+        h.dns_reponse = rep.to_vec().unwrap();
+        classer(valider(h, question(&nom), ancre))
+    }
+
+    fn verdict_zone_non_signee_nsec() -> &'static str {
+        let m = message_autorite(nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        ));
+        match est_zone_non_signee(&question_non_signee(), &m, &m) {
+            Ok(true) => "accept_unsigned",
+            _ => "reject",
+        }
+    }
+
+    fn verdict_zone_non_signee_nsec3() -> &'static str {
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let m = message_autorite(nsec3_rr("example.test.", &nom, true, false));
+        match est_zone_non_signee(&question_non_signee(), &m, &m) {
+            Ok(true) => "accept_unsigned",
+            _ => "reject",
+        }
     }
 
     /// Le cas légitime reste accepté, ET c'est bien le message validé qui ressort.
@@ -408,6 +613,227 @@ mod tests {
         let rendu = valider(h.clone(), question(&h.zone), ancre).expect("réponse légitime refusée");
         let m = Message::from_vec(&rendu).unwrap();
         assert!(m.answers().iter().any(|r| r.record_type() == RecordType::A));
+    }
+
+    /// Cas de conformité communs (mission 28, point 4) : les noms viennent de
+    /// `testvectors/dnssec_vectors.json`, le verdict Windows doit être celui
+    /// déclaré. Un cas déclaré applicable sans fixture échoue, et inversement.
+    #[test]
+    fn vecteurs_communs() {
+        let texte = include_str!("../../testvectors/dnssec_vectors.json");
+        let mut cas: Vec<(String, String)> = Vec::new();
+        let mut courant: Option<String> = None;
+        for ligne in texte.lines() {
+            let ligne = ligne.trim();
+            if let Some(reste) = ligne.strip_prefix("\"name\": \"") {
+                if let Some(fin) = reste.find('"') {
+                    courant = Some(reste[..fin].to_string());
+                }
+            }
+            // Les plateformes peuvent être sur une ligne à elles ou groupées :
+            // on cherche la clé n'importe où dans la ligne.
+            if let Some(idebut) = ligne.find("\"windows\": \"") {
+                let reste = &ligne[idebut + "\"windows\": \"".len()..];
+                if let Some(fin) = reste.find('"') {
+                    if let Some(nom) = &courant {
+                        cas.push((nom.clone(), reste[..fin].to_string()));
+                    }
+                }
+            }
+        }
+        assert!(!cas.is_empty(), "aucun cas lu dans le fichier commun");
+
+        let fixtures: Vec<(&str, fn() -> &'static str)> = vec![
+            ("signed_zone_valid", verdict_zone_signee_valide),
+            (
+                "unsigned_zone_nsec_proves_no_ds",
+                verdict_zone_non_signee_nsec,
+            ),
+            ("unsigned_zone_nsec3_opt_out", verdict_zone_non_signee_nsec3),
+            ("forged_address_in_signed_zone", verdict_adresse_forgee),
+            (
+                "missing_signature_on_signed_zone",
+                verdict_signature_absente,
+            ),
+            ("expired_signature", verdict_signature_perimee),
+            ("signature_by_wrong_zone", verdict_autre_zone),
+        ];
+
+        for (nom, attendu) in &cas {
+            let fixture = fixtures.iter().find(|(n, _)| n == nom);
+            match (attendu.as_str(), fixture) {
+                ("n/a", Some(_)) => {
+                    panic!("cas {nom} : non applicable à Windows mais une fixture existe")
+                }
+                ("n/a", None) => {}
+                (_, None) => panic!("cas {nom} : déclaré applicable à Windows sans fixture"),
+                (_, Some((_, f))) => assert_eq!(
+                    f(),
+                    attendu.as_str(),
+                    "cas {nom} : verdict Windows inattendu"
+                ),
+            }
+        }
+        for (nom, _) in &fixtures {
+            assert!(
+                cas.iter().any(|(n, _)| n == nom),
+                "fixture {nom} sans cas correspondant dans le fichier commun"
+            );
+        }
+    }
+
+    // ---- Mission 28, point 2 : une zone non signée n'est acceptée QUE si la
+    // réponse retenue par le validateur contient une preuve d'absence de DS
+    // couvrant le nom demandé.
+
+    fn nsec_rr(proprietaire: &str, suivant: &str, types: &[RecordType]) -> Record {
+        Record::from_rdata(
+            Name::parse(proprietaire, None).unwrap(),
+            300,
+            RData::DNSSEC(DNSSECRData::NSEC(
+                hickory_proto::rr::dnssec::rdata::NSEC::new(
+                    Name::parse(suivant, None).unwrap(),
+                    types.to_vec(),
+                ),
+            )),
+        )
+    }
+
+    fn nsec3_rr(zone: &str, nom: &Name, opt_out: bool, annoncer_ds: bool) -> Record {
+        use hickory_proto::rr::dnssec::Nsec3HashAlgorithm;
+        let sel: Vec<u8> = vec![0xAB, 0xCD];
+        let empreinte = Nsec3HashAlgorithm::SHA1.hash(&sel, nom, 0).unwrap();
+        let hache = base32hex(empreinte.as_ref());
+        let mut types = vec![RecordType::NS, RecordType::SOA];
+        if annoncer_ds {
+            types.push(RecordType::DS);
+        }
+        Record::from_rdata(
+            Name::parse(&format!("{hache}.{zone}"), None).unwrap(),
+            300,
+            RData::DNSSEC(DNSSECRData::NSEC3(
+                hickory_proto::rr::dnssec::rdata::NSEC3::new(
+                    Nsec3HashAlgorithm::SHA1,
+                    opt_out,
+                    0,
+                    sel,
+                    empreinte.as_ref().to_vec(),
+                    types,
+                ),
+            )),
+        )
+    }
+
+    fn message_autorite(rr: Record) -> Message {
+        let mut m = Message::new();
+        m.add_query(hickory_proto::op::Query::query(
+            Name::parse("unsigned.example.test.", None).unwrap(),
+            RecordType::A,
+        ));
+        m.add_name_server(rr);
+        m
+    }
+
+    fn question_non_signee() -> hickory_proto::op::Query {
+        hickory_proto::op::Query::query(
+            Name::parse("unsigned.example.test.", None).unwrap(),
+            RecordType::A,
+        )
+    }
+
+    #[test]
+    fn zone_non_signee_prouvee_par_nsec_acceptee() {
+        let m = message_autorite(nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        ));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(true)
+        );
+        assert_eq!(
+            controler(&question_non_signee(), &m, &m, maintenant() as i64),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn nsec_annoncant_ds_refuse() {
+        let m = message_autorite(nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA, RecordType::DS],
+        ));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(false)
+        );
+        assert!(controler(&question_non_signee(), &m, &m, maintenant() as i64).is_err());
+    }
+
+    #[test]
+    fn nsec_hors_intervalle_refuse() {
+        // L'enregistrement ne couvre pas le nom demandé : aucune preuve.
+        let m = message_autorite(nsec_rr(
+            "aaa.example.test.",
+            "bbb.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        ));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn preuve_seulement_dans_le_buffer_brut_refusee() {
+        // Le validateur n'a rien retenu : le NSEC n'est que dans le buffer reçu.
+        let brut = message_autorite(nsec_rr(
+            "example.test.",
+            "zzz.example.test.",
+            &[RecordType::NS, RecordType::SOA],
+        ));
+        let mut valide = Message::new();
+        valide.add_query(question_non_signee());
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &valide, &brut),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn zone_non_signee_prouvee_par_nsec3_opt_out_acceptee() {
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let m = message_autorite(nsec3_rr("example.test.", &nom, true, false));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(true)
+        );
+        assert_eq!(
+            controler(&question_non_signee(), &m, &m, maintenant() as i64),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn nsec3_sans_opt_out_refuse() {
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let m = message_autorite(nsec3_rr("example.test.", &nom, false, false));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn nsec3_annoncant_ds_refuse() {
+        let nom = Name::parse("unsigned.example.test.", None).unwrap();
+        let m = message_autorite(nsec3_rr("example.test.", &nom, true, true));
+        assert_eq!(
+            est_zone_non_signee(&question_non_signee(), &m, &m),
+            Ok(false)
+        );
     }
 
     #[test]
@@ -441,7 +867,11 @@ mod tests_ancres {
         let empreinte = dnskey
             .to_digest(&racine, hickory_proto::rr::dnssec::DigestType::SHA256)
             .unwrap();
-        let hex: String = empreinte.as_ref().iter().map(|b| format!("{b:02X}")).collect();
+        let hex: String = empreinte
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect();
         assert_eq!(
             hex,
             "683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16"

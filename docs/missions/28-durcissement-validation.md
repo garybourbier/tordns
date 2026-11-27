@@ -41,7 +41,7 @@ COMPORTEMENT CORRECT attendu, jamais une marche à suivre pour exploiter l'ancie
    tient (« la réponse du nœud n'est jamais relayée », « aucune corrélation temporelle en
    mémoire », « zone non signée acceptée »).
 7. **Exploitation** : noter dans `docs/` le calendrier racine (KSK-2017 révoquée le
-   11/01/2027, retirée le 22/03/2027) et la façon de livrer une nouvelle ancre par le
+   11/01/2027, retirée de la zone le 22/03/2027 ; KSK-2024 active depuis le 11/10/2026) et la façon de livrer une nouvelle ancre par le
    manifeste signé.
 
 ## Preuve

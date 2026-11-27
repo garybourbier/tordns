@@ -43,6 +43,9 @@ func main() {
 	indispoMax := flag.Int("indispo-max", 6, "échecs réseau consécutifs avant éviction")
 	maxJour := flag.Int("max-jour", 50, "inscriptions acceptées par jour")
 	maxIP := flag.Int("max-ip", 3, "inscriptions acceptées par source et par jour")
+	adressesLocales := flag.Bool("adresses-locales", false, "accepter 127.0.0.1:port pour les bancs de test (JAMAIS en service)")
+	retentionCandidats := flag.Duration("retention-candidats", 7*24*time.Hour, "durée max de rétention d'un candidat non confirmé (0 = infini)")
+	retentionEvinces := flag.Duration("retention-evinces", 30*24*time.Hour, "durée max de rétention d'une éviction (0 = infini)")
 	flag.Parse()
 
 	domaines := []string{}
@@ -91,6 +94,9 @@ func main() {
 		OnionbalanceStatus:   *onionbalanceStatus,
 		ReseauFichier:        *reseauFichier,
 		ReseauInterneFichier: *reseauInterne,
+		AdressesLocales:      *adressesLocales,
+		RetentionCandidats:   *retentionCandidats,
+		RetentionEvinces:     *retentionEvinces,
 	}
 	r, err := nouveauRegistre(*etatChemin, *poolChemin, cfg)
 	if err != nil {

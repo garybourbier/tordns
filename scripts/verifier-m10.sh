@@ -129,7 +129,8 @@ printf 'exemple.test\n' >"$TMP/domaines.txt"
 "$TMP/registre" -ecoute "127.0.0.1:$PORT_REGISTRE" \
 	-etat "$TMP/registre-etat/etat.json" -pool "$TMP/pools/communaute.txt" \
 	-domaines "$TMP/domaines.txt" -reference "127.0.0.1:$PORT_DNS" \
-	-socks "" -proxy-protocole=false -quarantaine 1s -intervalle 1s -sondes-min 1 >"$TMP/registre.log" 2>&1 &
+	-socks "" -proxy-protocole=false -quarantaine 1s -intervalle 1s -sondes-min 1 \
+	-adresses-locales >"$TMP/registre.log" 2>&1 &
 PORTE=$!
 sleep 1
 curl -fsS --max-time 5 "http://127.0.0.1:$PORT_REGISTRE/etat" >/dev/null || { cat "$TMP/registre.log" >&2; echec "registre muet"; }

@@ -20,4 +20,5 @@ javac --release 11 -Xlint:all -Werror -classpath "$LIBRAIRIES/*" -d "$SORTIE" \
     "$RACINE/app/src/main/java/org/tordns/client/Arti.java" \
     "$RACINE/tests/TestDnssec.java"
 java -cp "$SORTIE:$LIBRAIRIES/*" org.tordns.client.TestLocal
-java -cp "$SORTIE:$LIBRAIRIES/*" org.tordns.client.TestDnssec
+# Les cas de conformité DNSSEC viennent de testvectors/, à la racine du dépôt.
+TOR_DNS_RACINE="$RACINE/.." java -cp "$SORTIE:$LIBRAIRIES/*" org.tordns.client.TestDnssec

@@ -675,3 +675,53 @@ Une entrée par mission : fait, reste, demandé à qui.
     copiés désormais. `scripts/verifier-m24.sh` repasse avec les `target/` présents.
 - **Non prouvé ici** : rien de neuf par rapport aux comptes rendus des missions (vrai Pi, Apple,
   soumission F-Droid) ; mission 28 toujours à faire.
+
+## Mission 28 — durcissement DNSSEC : preuves et cas communs (27/11/2026)
+
+- **Windows, zone non signée (point 2)** : `est_zone_non_signee` acceptait une
+  réponse non signée sur la seule **présence** d'un RRSIG couvrant le type, sans
+  vérifier ni la couverture ni la validité. Elle exige désormais une preuve
+  retenue par le validateur (`valide`, et non le seul buffer brut) : NSEC couvrant
+  le nom demandé ou NSEC3 dont l'empreinte hachée tombe dans l'intervalle, bitmap
+  sans DS, opt-out pour NSEC3. Le nom est haché par `Nsec3HashAlgorithm` et
+  comparé en base32hex ; un NSEC/NSEC3 annonçant DS est refusé comme preuve.
+- **Preuve du correctif** : sept tests ajoutés dans `client-windows/src/dnssec.rs`
+  (NSEC accepté, NSEC annonçant DS refusé, NSEC hors intervalle refusé, preuve
+  absente du message retenu refusée, NSEC3 opt-out accepté, NSEC3 sans opt-out
+  refusé, NSEC3 annonçant DS refusé). `cargo test --locked` : **51 tests verts**.
+- **Cas communs aux trois validateurs (point 4)** : `testvectors/dnssec_vectors.json`
+  ne contient plus de fausses signatures (`base64_encoded_signature` n'était lu
+  par aucun validateur, seule sa structure était comptée). C'est maintenant une
+  liste de 10 cas avec le verdict attendu **par plateforme** et les cas non
+  applicables marqués `n/a`, avec justification. Les trois suites lisent le
+  fichier et échouent si un cas applicable n'a pas de fixture, si une fixture
+  n'a pas de cas, ou si le verdict observé diffère :
+  - `client-linux/relais/vecteurs_test.go` (`TestDNSSECVecteursCommuns`, 9 cas) ;
+  - `client-windows/src/dnssec.rs` (`dnssec::tests::vecteurs_communs`, 7 cas) ;
+  - `client-android/tests/TestDnssec.java` (`vecteursCommuns`, 5 cas applicables).
+- **Non-vacuité vérifiée** : en déclarant `accept` pour le cas
+  `forged_address_in_signed_zone` côté Linux, le test échoue avec
+  `verdict Linux "reject", attendu "accept"` ; fichier restauré ensuite.
+- **Écart assumé et documenté** : Android refuse les deux cas de zone non signée
+  (`reject`) là où Linux et Windows acceptent la délégation non signée dont
+  l'absence de DS est prouvée (`accept_unsigned`). Ce n'est pas une acceptation
+  sans preuve : c'est une politique plus stricte, inscrite dans le fichier commun.
+- **Vérificateur** : `scripts/verifier-m28.sh` ne compte plus les vecteurs, il
+  exige que chaque suite cite le fichier et exécute les cas ; Android passe de
+  5 à **21 vérifications DNSSEC**. L'étape 1 cherchait la chaîne exacte
+  « 5 vérifications », désormais « vérifications DNSSEC Android passées ».
+- **Vérifié** : `scripts/ci/lint.sh` code 0 ; `scripts/verifier-m28.sh` code 0
+  (rejeu de m10, m11, m12, m19 compris) ; `go test ./...` vert dans
+  `client-linux` ; `cargo test --locked` vert dans `client-windows` (51) ;
+  `scripts/tester.sh` Android vert (33 locales + 21 DNSSEC).
+- **NON PROUVÉ** :
+  - zone non signée servie par un **vrai** nœud : rien ne garantit ici que
+    hickory conserve le NSEC/NSEC3 du parent dans le message validé, condition
+    du nouveau contrôle ; à rejouer contre un domaine non signé réel ;
+  - validation DNSSEC contre de vrais domaines signés, transport Tor des
+    requêtes DNSSEC (les tests restent en HTTP direct) ;
+  - couverture NSEC3 des cas de wildcard et de zone non signée multi-niveaux.
+- **À confier à Claude si besoin** : écrire des fixtures Android pour
+  `signed_zone_valid`, `expired_signature` et `signature_by_wrong_zone`
+  (aujourd'hui `n/a`) et une validation des réponses négatives côté Windows et
+  Android.

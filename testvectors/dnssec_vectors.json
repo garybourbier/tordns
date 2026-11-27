@@ -1,0 +1,99 @@
+{
+  "description": "Cas de conformité DNSSEC communs aux trois validateurs. Chaque cas nomme une situation et le verdict attendu sur chaque plateforme ; les fixtures cryptographiques sont construites par la suite de tests de chaque langage (les clés de test ne sont pas partagées). Les trois suites lisent ce fichier et ÉCHOUENT si un cas applicable n'a pas de fixture, ou si le verdict observé diffère.",
+  "version": 2,
+  "verdicts": ["accept", "accept_unsigned", "reject"],
+  "vectors": [
+    {
+      "name": "signed_zone_valid",
+      "description": "Chaîne complète signée (racine, TLD, zone) avec signature valide ; l'adresse est servie telle quelle.",
+      "query": { "name": "example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "accept",
+      "plateformes": {
+        "linux": "accept",
+        "windows": "accept",
+        "android": "n/a"
+      },
+      "notes": "Android : le validateur remonte jusqu'aux ancres racine IANA, une zone de test ne peut donc pas produire un « tout signé » vérifiable sans racine réelle."
+    },
+    {
+      "name": "unsigned_zone_nsec_proves_no_ds",
+      "description": "Délégation sans DS, prouvée par un NSEC signé du parent dont le bitmap n'annonce pas DS.",
+      "query": { "name": "unsigned.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "accept_unsigned",
+      "plateformes": {
+        "linux": "accept_unsigned",
+        "windows": "accept_unsigned",
+        "android": "reject"
+      },
+      "divergence": "Android refuse toute zone non signée (mission 28, point 1 : REFUS exigé pour une réponse non signée). Linux et Windows acceptent la délégation NON signée dont l'absence de DS est prouvée. Écart assumé et documenté, pas une acceptation sans preuve."
+    },
+    {
+      "name": "unsigned_zone_nsec3_opt_out",
+      "description": "Délégation sans DS couverte par un NSEC3 opt-out signé du parent.",
+      "query": { "name": "unsigned.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "accept_unsigned",
+      "plateformes": {
+        "linux": "accept_unsigned",
+        "windows": "accept_unsigned",
+        "android": "reject"
+      },
+      "divergence": "Même écart que unsigned_zone_nsec_proves_no_ds : Android refuse, Linux et Windows acceptent sur preuve."
+    },
+    {
+      "name": "forged_address_in_signed_zone",
+      "description": "L'adresse est modifiée après signature : l'RRSIG ne couvre pas les données servies.",
+      "query": { "name": "example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "reject",
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "reject" },
+      "notes": "Windows couvre aussi le cas 4a de la relecture : adresse forgée accompagnée de la DNSKEY d'ancrage."
+    },
+    {
+      "name": "missing_signature_on_signed_zone",
+      "description": "Zone signée mais réponse sans RRSIG sur l'RRset demandé (RRset ajouté à la main).",
+      "query": { "name": "www.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "reject",
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "reject" },
+      "notes": "Linux : RRset A non signé injecté à côté d'une réponse signée. Android : DNSKEY signée mais A sans RRSIG."
+    },
+    {
+      "name": "expired_signature",
+      "description": "Signature authentique mais hors de sa période de validité (rejeu d'une chaîne archivée).",
+      "query": { "name": "www.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "reject",
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "n/a" },
+      "notes": "Android : pas de fixture d'horloge, non couvert à ce jour."
+    },
+    {
+      "name": "signature_by_wrong_zone",
+      "description": "Signature parfaitement valide, mais faite par une zone qui n'est ni le nom signé ni un de ses ancêtres (attaque cross-zone).",
+      "query": { "name": "victime.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "reject",
+      "plateformes": { "linux": "reject", "windows": "reject", "android": "n/a" },
+      "notes": "Linux couvre aussi le voisin de suffixe (badexample.test signé par example.test)."
+    },
+    {
+      "name": "no_do_bit_request",
+      "description": "Le nœud ne signe pas quand le bit DO est absent : la réponse n'apporte aucune preuve et doit être refusée.",
+      "query": { "name": "example.test.", "type": "A", "do_bit": false },
+      "expected_verdict": "reject",
+      "plateformes": { "linux": "n/a", "windows": "n/a", "android": "reject" },
+      "notes": "Linux et Windows posent eux-mêmes DO sur leurs requêtes de validation : le cas ne s'y présente pas. Android le teste explicitement (transport qui ne signe que si DO)."
+    },
+    {
+      "name": "nxdomain_with_nsec_proof",
+      "description": "NXDOMAIN accompagné de la preuve NSEC signée (couverture du nom et absence de wildcard).",
+      "query": { "name": "absent.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "accept",
+      "plateformes": { "linux": "accept", "windows": "n/a", "android": "n/a" },
+      "notes": "Windows et Android ne valident pas encore les réponses négatives ; non couvert, donc aucun verdict inventé."
+    },
+    {
+      "name": "nodata_with_nsec_proof",
+      "description": "Nom existant, type A demandé et absent, prouvé par un NSEC signé qui annonce TXT mais pas A.",
+      "query": { "name": "present.example.test.", "type": "A", "do_bit": true },
+      "expected_verdict": "accept",
+      "plateformes": { "linux": "accept", "windows": "n/a", "android": "n/a" },
+      "notes": "Le pendant refusé (NSEC qui annonce le type demandé) est couvert par les tests Linux."
+    }
+  ]
+}
