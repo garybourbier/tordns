@@ -863,3 +863,45 @@ Une entrée par mission : fait, reste, demandé à qui.
   - première rotation d'ancre réellement livrée à un parc ;
   - premier passage GitHub Actions, signature APK, notarisation, attestations
     et images GHCR (voir `docs/checklist-release-0.8.0.md`).
+
+## Mission 28 — le point 2 n'était pas atteint : zones non signées Windows (27/11/2026)
+
+- **Défaut trouvé en relisant hickory 0.24** : `est_zone_non_signee` était bien
+  écrite et testée, mais jamais atteinte sur le chemin réel. Dans
+  `xfer/dnssec_dns_handle.rs`, `verify_default_rrset` renvoie
+  `RrsigsNotPresent` quand un RRset n'a aucune signature, et `verify_rrsets`
+  renvoie l'erreur dès qu'aucun RRset n'a été validé : une réponse de zone non
+  signée échoue donc AVANT `controler`. Les tests du point 2 appelaient
+  `est_zone_non_signee` ou `controler` directement, jamais `valider` de bout en
+  bout : le correctif était inerte en production, et toute zone non signée
+  restait en SERVFAIL — exactement ce que le point 2 devait corriger.
+- **Preuve du défaut** : nouveau test
+  `zone_non_signee_prouvee_acceptee_de_bout_en_bout` (parent signé, NSEC du
+  parent annonçant NS sans DS, réponse A de l'enfant sans RRSIG). Sans le
+  correctif il échoue avec
+  `validation DNSSEC : rrsigs are not present for record set name:
+  unsigned.example.test. record_type: A` ; avec, il passe.
+- **Correctif** : quand hickory refuse, `accepter_non_signee` remonte les labels
+  du nom demandé et interroge le DS de chacun **par le même validateur**
+  (`Delegation::Signee` / `SansDs` / `Indetermine`) : un DS prouve une zone
+  signée (refus conservé), un NSEC au nom de la délégation annonçant NS sans DS
+  prouve une zone non signée. La réponse reçue est alors servie, réduite à la
+  question et aux enregistrements de la zone prouvée ; toute preuve absente ou
+  ambiguë laisse le refus de hickory intact, et une réponse vide est refusée.
+  Rien n'est accepté sur un simple échec du validateur.
+- **NSEC3 sous le parent** : hickory 0.24 ne valide aucune négation NSEC3, donc
+  la preuve d'absence de DS n'arrive pas et le chemin complet refuse (échec
+  fermé). Nouveau test `zone_non_signee_sous_parent_nsec3_refusee`, et le
+  vecteur commun `unsigned_zone_nsec3_opt_out` déclare désormais `reject` côté
+  Windows : il annonçait `accept_unsigned` sur la seule fonction
+  `est_zone_non_signee`, pas sur le chemin réel.
+- **Vérifié** : `cargo test --locked` dans `client-windows` (**60 tests**,
+  dont 3 nouveaux de bout en bout et un de refus NSEC3).
+- **NON PROUVÉ** :
+  - aucun essai contre la vraie racine ici : le chemin DS + reprise n'a été
+    exercé qu'avec des fixtures ; `google.com` (zone non signée réelle) reste à
+    essayer avant diffusion ;
+  - NSEC3 sous le parent, donc une partie des zones non signées réelles, reste
+    en SERVFAIL côté Windows (limite hickory, figée par test) ;
+  - une réponse non signée atteinte par CNAME depuis une zone signée est encore
+    refusée : le chemin DS porte sur le nom demandé, pas sur la cible.

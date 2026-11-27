@@ -34,10 +34,10 @@
       "expected_verdict": "accept_unsigned",
       "plateformes": {
         "linux": "accept_unsigned",
-        "windows": "accept_unsigned",
+        "windows": "reject",
         "android": "reject"
       },
-      "divergence": "Même écart que unsigned_zone_nsec_proves_no_ds : Android refuse, Linux et Windows acceptent sur preuve."
+      "divergence": "Android refuse toute zone non signée. Windows refuse celle-ci : hickory 0.24 ne valide aucune négation NSEC3, donc la preuve d'absence de DS n'arrive jamais et le chemin complet échoue fermé (SERVFAIL), alors que son contrôle de preuve saurait lire un NSEC3 opt-out (test unitaire). Linux accepte le NSEC3 opt-out validé. Différence de bibliothèque, pas d'acceptation sans preuve."
     },
     {
       "name": "forged_address_in_signed_zone",

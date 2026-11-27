@@ -65,13 +65,17 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
 
 - **Windows** : installation réelle, redémarrage et ACL NTFS non prouvés hors
   Windows (Wine n'a pas d'ACL NTFS). (journal, missions 12 et 13)
-- **Windows, réponses négatives NSEC3** : hickory 0.24 ne valide que les
-  preuves NSEC. Un NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est
-  refusé (SERVFAIL) plutôt qu'accepté sans preuve. C'est conservateur, mais
-  une partie des zones signées de l'Internet utilise NSEC3 ; aucun nom n'est
-  mal résolu, ces réponses échouent. Le refus est figé par le test
-  `nxdomain_nsec3_seul_refuse` (`client-windows/src/dnssec.rs`).
-  (journal, mission 28)
+- **Windows, NSEC3** : hickory 0.24 ne valide que les preuves NSEC. Un
+  NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est refusé (SERVFAIL),
+  et une zone non signée déléguée par un parent NSEC3 aussi : la preuve
+  d'absence de DS n'arrive jamais. C'est conservateur, mais une partie des
+  zones de l'Internet utilise NSEC3 ; aucun nom n'est mal résolu, ces réponses
+  échouent. Le refus est figé par les tests `nxdomain_nsec3_seul_refuse` et
+  `zone_non_signee_sous_parent_nsec3_refusee`
+  (`client-windows/src/dnssec.rs`). (journal, mission 28)
+- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC est
+  testée hors ligne ; elle n'a pas encore été exercée contre une vraie racine
+  (`google.com` par exemple). (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)
 - **Android** : l'APK n'est pas signé par une clé de production dans les
