@@ -66,18 +66,21 @@ journal ; la référence entre parenthèses renvoie à l'entrée du journal.
 - **Windows** : installation réelle, redémarrage et ACL NTFS non prouvés hors
   Windows (Wine n'a pas d'ACL NTFS). (journal, missions 12 et 13)
 - **Windows, réponses négatives NSEC3** : hickory 0.24 ne valide que les
-  preuves NSEC. Un NXDOMAIN ou un NODATA dans une zone signée en NSEC3 est
-  donc refusé (SERVFAIL) : c'est conservateur, aucun nom n'est mal résolu,
-  mais ces réponses échouent. La preuve d'absence de DS d'une délégation, elle,
-  est vérifiée par le client lui-même (`delegation_nsec3` : RRSIG contrôlé
-  avec la DNSKEY validée par la chaîne d'ancres, puis couverture RFC 5155),
-  donc une zone non signée sous un parent NSEC3 est servie. Le refus des
-  négatifs reste figé par `nxdomain_nsec3_seul_refuse`
-  (`client-windows/src/dnssec.rs`). (journal, mission 28)
-- **Windows, zone non signée réelle** : l'acceptation prouvée par NSEC ou
-  NSEC3, y compris la cible d'un CNAME (`completer_zone_non_signee`), est
-  testée hors ligne ; elle n'a pas encore été exercée contre une vraie racine
-  (`google.com` par exemple). (journal, mission 28)
+  preuves NSEC, donc un NXDOMAIN ou un NODATA d'une zone signée en NSEC3 lui
+  rend une erreur. Le client vérifie alors lui-même la SOA et les NSEC3
+  (`servir_negatif_nsec3` : RRSIG contrôlé avec la DNSKEY validée par la
+  chaîne d'ancres, horloge comprise, puis preuve RFC 5155 à trois NSEC3 —
+  plus proche enclos, nom suivant, wildcard). Une preuve incomplète, non
+  signée ou périmée reste refusée (SERVFAIL). Comme côté Linux, un NSEC3
+  opt-out couvrant le nom est accepté pour un NXDOMAIN, conformément à
+  RFC 5155. L'ensemble n'a pas été exercé contre une vraie zone NSEC3 : voir
+  l'entrée suivante. (journal, mission 28)
+- **Windows, DNSSEC hors ligne** : l'acceptation d'une zone non signée
+  prouvée par NSEC ou NSEC3, la cible d'un CNAME (`completer_zone_non_signee`)
+  et les réponses négatives NSEC3 (`servir_negatif_nsec3`) sont testées avec
+  des fixtures signées en mémoire. Aucune n'a encore été exercée contre une
+  vraie racine (`google.com` par exemple, ou un nom inexistant sous `.com`).
+  (journal, mission 28)
 - **macOS** : lancement réel, `launchd`, paquet `.pkg`, signature Developer ID
   et notarisation non prouvés. (journal, missions 15, 21)
 - **Android** : l'APK n'est pas signé par une clé de production dans les

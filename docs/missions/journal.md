@@ -942,6 +942,55 @@ Une entrée par mission : fait, reste, demandé à qui.
   nécessaire ici puisque chaque maillon est validé indépendamment, mais aucun
   cas réel à trois maillons n'a été essayé.
 
+## Mission 28 — réponses négatives NSEC3 côté Windows (28/11/2026)
+
+- **Défaut** : hickory 0.24 ne valide aucune négation NSEC3. Pour un NXDOMAIN
+  ou un NODATA dans une zone signée en NSEC3 (la plupart des zones sous
+  `.com`), il rend une erreur ; `valider` basculait alors sur
+  `accepter_non_signee`, qui ne prouve que l'absence de DS et refusait. Tout
+  nom inexistant dans une telle zone répondait SERVFAIL.
+- **Correctif** (`servir_negatif_nsec3`) : sur le chemin d'erreur (et quand le
+  message validé est vide), le client relit la réponse brute et n'en croit rien
+  sans trois contrôles indépendants :
+  1. la SOA appartient à une zone ancêtre du nom demandé et son RRSIG est
+     vérifié avec une DNSKEY validée jusqu'à une ancre racine ;
+  2. chaque NSEC3 a un RRSIG de cette zone vérifié de la même façon, horloge
+     et numéro de clé compris ; un RRset sans signature valide ne sert pas de
+     preuve ;
+  3. la preuve suit RFC 5155 (`negation_nsec3_prouvee`) : plus proche enclos
+     prouvé par un NSEC3 au nom de l'ancêtre, « nom suivant » couvert, wildcard
+     couvert pour NXDOMAIN ; pour NODATA, NSEC3 au nom demandé dont le bitmap
+     n'annonce ni le type ni CNAME, ou wildcard correspondant/couvert. Une
+     requête DS garde la règle de `delegation_nsec3` (NS sans SOA ni DS, ou
+     opt-out couvrant).
+  La réponse servie ne contient que la question, le code de réponse et la SOA
+  authentifiée (le TTL négatif RFC 2308 reste exploité par le cache) ; aucune
+  réponse positive n'est reconstruite. Une preuve incomplète, non signée ou
+  périmée laisse le refus.
+- **Tests** : `nxdomain_nsec3_prouve_accepte` (trois NSEC3 : enclos, nom
+  suivant, wildcard ; NXDOMAIN servi avec sa SOA), `nodata_nsec3_au_nom_accepte`,
+  et quatre refus : `nxdomain_nsec3_incomplet_refuse` (remplace
+  `nxdomain_nsec3_seul_refuse`), `nodata_nsec3_annoncant_le_type_refuse`,
+  `negatif_nsec3_a_signature_invalide_refuse` (clé jamais publiée),
+  `negatif_nsec3_a_signature_perimee_refuse`. **Non-vacuité vérifiée** : en
+  neutralisant les deux appels à `servir_negatif_nsec3`, les deux tests
+  d'acceptation échouent et les refus passent ; fichier restauré ensuite.
+- **Docs** : `docs/securite/problemes-connus.md` ne décrit plus un refus des
+  négatifs NSEC3 mais l'absence d'essai contre une vraie zone ;
+  `docs/missions/00-lire-moi.md` et le commentaire de `nxdomain_prouve` sont
+  alignés.
+- **Vérifié** : `cargo test --locked --offline` dans `client-windows`
+  (**72 tests**), `scripts/ci/lint.sh` code 0, `scripts/verifier-m28.sh` code 0.
+- **NON PROUVÉ** :
+  - aucune réponse négative NSEC3 réelle n'a été rejouée : les fixtures sont
+    signées en mémoire. Un nom inexistant sous `.com` reste à essayer ;
+  - le cas opt-out d'un NXDOMAIN est accepté comme côté Linux, par
+    conformité RFC 5155 (le nom peut être une délégation non signée non
+    publiée) : non mesuré sur une zone réelle ;
+  - les paramètres NSEC3 (sel, itérations) ne sont pas confrontés d'une preuve
+    à l'autre ; chaque preuve est vérifiée indépendamment.
+
+
 ## Mission 28 — preuve d'absence de DS par NSEC3 côté Windows (28/11/2026)
 
 - **Défaut** : hickory 0.24 ne valide aucune négation NSEC3 (« As of now, only
@@ -985,7 +1034,7 @@ Une entrée par mission : fait, reste, demandé à qui.
   - les réponses **négatives** NSEC3 (NXDOMAIN/NODATA dans une zone signée en
     NSEC3) restent refusées : `nxdomain_nsec3_seul_refuse` n'est pas levé,
     faute d'avoir validé ici la preuve à trois NSEC3 (plus proche enclos,
-    nom suivant, wildcard) ;
+    nom suivant, wildcard) — **levé le 28/11/2026**, voir ci-dessus ;
   - les paramètres NSEC3 (sel, itérations) ne sont pas confrontés d'un
     enregistrement à l'autre : chaque preuve est vérifiée indépendamment, ce
     qui ne peut pas affaiblir la validation mais ne détecte pas une zone

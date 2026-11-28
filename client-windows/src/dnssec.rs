@@ -96,10 +96,13 @@ where
     let reponse = match futures::executor::block_on(futures::StreamExt::next(&mut flux)) {
         Some(Ok(reponse)) => reponse,
         Some(Err(e)) => {
-            // hickory refuse une réponse sans RRSIG avant tout autre contrôle :
-            // une zone sans DS n'a pourtant rien à signer. Prouver l'absence de
-            // DS chez le parent, puis servir la réponse reçue, limitée à la zone
-            // prouvée. Sans preuve, le refus de hickory est conservé.
+            // hickory 0.24 ne valide aucune négation NSEC3 et refuse aussi les
+            // réponses sans RRSIG avant tout autre contrôle. Deux chemins :
+            // une réponse négative authentifiée par des NSEC3, puis une zone
+            // sans DS dont le parent prouve l'absence de délégation signée.
+            if let Ok(reponse) = servir_negatif_nsec3(&handle, &ancre, &message) {
+                return Ok(reponse);
+            }
             return accepter_non_signee(&handle, &ancre, &message)
                 .map_err(|motif| format!("validation DNSSEC : {e} ; {motif}"));
         }
@@ -112,7 +115,15 @@ where
     // n'ont pas vérifié mais garde le buffer d'origine intact : `into_buffer()`
     // relayait donc la réponse du nœud sans filtrage (relecture du 24/11, point 4a).
     let mut valide = reponse.into_message();
-    controler(&question, &valide, &brut, maintenant_unix())?;
+    if let Err(motif) = controler(&question, &valide, &brut, maintenant_unix()) {
+        // hickory 0.24 ne valide aucune négation NSEC3 : selon la réponse, il
+        // rend une erreur ou un message vidé de sa preuve. Un NXDOMAIN ou un
+        // NODATA authentifié par des NSEC3 est vérifié ici avant d'être servi.
+        if let Ok(reponse) = servir_negatif_nsec3(&handle, &ancre, &message) {
+            return Ok(reponse);
+        }
+        return Err(motif);
+    }
     // Une réponse d'une zone signée peut porter, après un CNAME, les
     // enregistrements d'une zone non signée : hickory les a retirés faute de
     // signature à vérifier. Ils ne reviennent que sur preuve d'absence de DS.
@@ -337,20 +348,7 @@ fn nsec3_signees(
         if rrset.is_empty() {
             continue;
         }
-        let debut = sig.sig_inception() as i64;
-        let fin = sig.sig_expiration() as i64;
-        if maintenant + DERIVE_HORLOGE_S < debut || maintenant - DERIVE_HORLOGE_S > fin {
-            continue;
-        }
-        let verifiee = cles.iter().any(|cle| {
-            cle.calculate_key_tag()
-                .is_ok_and(|tag| tag == sig.key_tag())
-                && cle.algorithm() == sig.algorithm()
-                && cle
-                    .verify_rrsig(sig_rr.name(), DNSClass::IN, sig, &rrset)
-                    .is_ok()
-        });
-        if !verifiee {
+        if !signature_valide(sig_rr, &rrset, zone, cles, maintenant) {
             continue;
         }
         for rr in &rrset {
@@ -364,6 +362,265 @@ fn nsec3_signees(
         }
     }
     sortie
+}
+
+/// Vrai si `sig_rr` porte un RRSIG de `zone` qui couvre le type de `rrset`, dont
+/// la période de validité contient `maintenant` (dérive d'horloge comprise) et
+/// qui est vérifié par une des `cles` déjà validées jusqu'à une ancre racine.
+/// Aucun enregistrement n'est cru sans cette preuve.
+fn signature_valide(
+    sig_rr: &Record,
+    rrset: &[Record],
+    zone: &Name,
+    cles: &[DNSKEY],
+    maintenant: i64,
+) -> bool {
+    let Some(premier) = rrset.first() else {
+        return false;
+    };
+    let Some(sig) = sig_rr
+        .data()
+        .and_then(RData::as_dnssec)
+        .and_then(DNSSECRData::as_rrsig)
+    else {
+        return false;
+    };
+    if sig.type_covered() != premier.record_type()
+        || !sig.signer_name().eq_case(zone)
+        || !sig_rr.name().eq_case(premier.name())
+    {
+        return false;
+    }
+    let debut = sig.sig_inception() as i64;
+    let fin = sig.sig_expiration() as i64;
+    if maintenant + DERIVE_HORLOGE_S < debut || maintenant - DERIVE_HORLOGE_S > fin {
+        return false;
+    }
+    cles.iter().any(|cle| {
+        cle.calculate_key_tag()
+            .is_ok_and(|tag| tag == sig.key_tag())
+            && cle.algorithm() == sig.algorithm()
+            && cle
+                .verify_rrsig(sig_rr.name(), DNSClass::IN, sig, rrset)
+                .is_ok()
+    })
+}
+
+/// Réponse négative (NXDOMAIN ou NODATA) authentifiée par des NSEC3.
+///
+/// hickory 0.24 ne valide aucune négation NSEC3 : la zone signée en NSEC3 — la
+/// plupart des zones sous `.com`, par exemple — rendait une erreur et ses noms
+/// inexistants répondaient SERVFAIL. La réponse brute est donc relue et crue
+/// seulement si :
+///
+/// 1. sa SOA appartient à une zone ancêtre du nom demandé et son RRSIG est
+///    vérifié ici avec une DNSKEY validée jusqu'à une ancre racine ;
+/// 2. ses NSEC3 portent chacun un RRSIG vérifié de la même façon, horloge
+///    comprise (un RRset sans signature valide est ignoré) ;
+/// 3. les preuves suivent RFC 5155 : plus proche enclos prouvé, nom suivant
+///    couvert, et wildcard couvert pour un NXDOMAIN ; bitmap sans le type
+///    demandé pour un NODATA.
+///
+/// La réponse servie ne porte que la question, le code de réponse et la SOA
+/// authentifiée (dont le TTL négatif RFC 2308 est exploité par le cache).
+fn servir_negatif_nsec3<H>(
+    handle: &H,
+    ancre: &TrustAnchor,
+    message: &Message,
+) -> Result<Vec<u8>, String>
+where
+    H: DnsHandle<Error = ProtoError> + Clone + 'static,
+{
+    use hickory_proto::op::ResponseCode;
+
+    let question = message
+        .queries()
+        .first()
+        .cloned()
+        .ok_or_else(|| "requête sans question".to_string())?;
+    let nom = question.name().clone();
+    let brut = reponse_brute(handle, message.clone())
+        .ok_or_else(|| "réponse négative absente".to_string())?;
+    let rcode = brut.response_code();
+    if rcode != ResponseCode::NXDomain && rcode != ResponseCode::NoError {
+        return Err(format!("réponse négative de code {rcode}"));
+    }
+    if brut
+        .answers()
+        .iter()
+        .any(|rr| rr.record_type() != RecordType::RRSIG)
+    {
+        return Err("réponse négative portant des réponses".to_string());
+    }
+
+    // Zone : la SOA de la section autorité la plus proche du nom demandé.
+    let zone = brut
+        .name_servers()
+        .iter()
+        .filter(|rr| rr.record_type() == RecordType::SOA && rr.name().zone_of(&nom))
+        .map(|rr| rr.name().clone())
+        .max_by_key(Name::num_labels)
+        .ok_or_else(|| "réponse négative sans SOA de zone".to_string())?;
+    let cles = cles_zone(handle, ancre, &zone);
+    if cles.is_empty() {
+        return Err("aucune DNSKEY validée pour la zone de la réponse négative".to_string());
+    }
+    let maintenant = maintenant_unix();
+    let soa: Vec<Record> = brut
+        .name_servers()
+        .iter()
+        .filter(|rr| rr.record_type() == RecordType::SOA && rr.name().eq_case(&zone))
+        .cloned()
+        .collect();
+    if soa.is_empty()
+        || !brut
+            .name_servers()
+            .iter()
+            .any(|sig| signature_valide(sig, &soa, &zone, &cles, maintenant))
+    {
+        return Err("SOA de la réponse négative non authentifiée".to_string());
+    }
+
+    let preuves = nsec3_signees(&brut, &zone, &cles, maintenant);
+    if preuves.is_empty() {
+        return Err("aucune preuve NSEC3 authentifiée".to_string());
+    }
+    if !negation_nsec3_prouvee(&nom, question.query_type(), rcode, &preuves, &zone) {
+        return Err("réponse négative sans preuve NSEC3 suffisante".to_string());
+    }
+
+    let mut sortie = Message::new();
+    sortie.set_id(brut.id());
+    sortie.set_message_type(brut.message_type());
+    sortie.set_op_code(brut.op_code());
+    sortie.set_response_code(rcode);
+    sortie.set_authoritative(brut.authoritative());
+    sortie.set_recursion_desired(brut.recursion_desired());
+    sortie.set_recursion_available(brut.recursion_available());
+    for q in message.queries() {
+        sortie.add_query(q.clone());
+    }
+    for rr in &soa {
+        sortie.add_name_server(rr.clone());
+    }
+    sortie.to_vec().map_err(|e| e.to_string())
+}
+
+/// Preuve NSEC3 d'une réponse négative, selon RFC 5155 § 8.4 à 8.7. `preuves`
+/// ne contient que des NSEC3 dont la signature a déjà été vérifiée.
+fn negation_nsec3_prouvee(
+    nom: &Name,
+    qtype: RecordType,
+    rcode: hickory_proto::op::ResponseCode,
+    preuves: &[(Name, NSEC3)],
+    zone: &Name,
+) -> bool {
+    use hickory_proto::op::ResponseCode;
+
+    // DS : une délégation non signée (NS sans SOA ni DS), ou un NSEC3 opt-out
+    // couvrant le nom. Même règle que `delegation_nsec3`.
+    if qtype == RecordType::DS {
+        if let Some(nsec3) = nsec3_trouve(preuves, nom) {
+            return !nsec3.type_bit_maps().contains(&RecordType::DS)
+                && nsec3.type_bit_maps().contains(&RecordType::NS)
+                && !nsec3.type_bit_maps().contains(&RecordType::SOA);
+        }
+        return nsec3_couvrant_preuve(preuves, nom).is_some_and(|nsec3| nsec3.opt_out());
+    }
+
+    if rcode == ResponseCode::NXDomain {
+        let Some((enclos, suivant)) = enclos(preuves, nom, zone) else {
+            return false;
+        };
+        // Le nom n'existe pas : le nom suivant est couvert par la chaîne, et
+        // aucun wildcard ne peut le remplacer.
+        let Some(sauvage) = etoile(&enclos) else {
+            return false;
+        };
+        return nsec3_couvrant_preuve(preuves, &suivant).is_some()
+            && nsec3_couvrant_preuve(preuves, &sauvage).is_some();
+    }
+    if rcode != ResponseCode::NoError {
+        return false;
+    }
+
+    // NODATA au nom demandé : le nom existe dans la chaîne NSEC3, et son bitmap
+    // n'annonce ni le type demandé ni un CNAME.
+    if let Some(nsec3) = nsec3_trouve(preuves, nom) {
+        return type_absent(nsec3, qtype);
+    }
+    // NODATA par wildcard : nom vide non terminal (plus proche enclos prouvé et
+    // nom suivant couvert), puis wildcard existant sans le type ou inexistant.
+    let Some((enclos, suivant)) = enclos(preuves, nom, zone) else {
+        return false;
+    };
+    if nsec3_couvrant_preuve(preuves, &suivant).is_none() {
+        return false;
+    }
+    let Some(sauvage) = etoile(&enclos) else {
+        return false;
+    };
+    match nsec3_trouve(preuves, &sauvage) {
+        Some(nsec3) => type_absent(nsec3, qtype),
+        None => nsec3_couvrant_preuve(preuves, &sauvage).is_some(),
+    }
+}
+
+/// NSEC3 au nom de `nom` (le nom existe dans la chaîne NSEC3).
+fn nsec3_trouve<'a>(preuves: &'a [(Name, NSEC3)], nom: &Name) -> Option<&'a NSEC3> {
+    preuves
+        .iter()
+        .find(|(proprietaire, nsec3)| nsec3_correspond(nsec3, proprietaire, nom))
+        .map(|(_, nsec3)| nsec3)
+}
+
+/// NSEC3 dont l'intervalle couvre `nom` (le nom est absent de la chaîne NSEC3).
+fn nsec3_couvrant_preuve<'a>(preuves: &'a [(Name, NSEC3)], nom: &Name) -> Option<&'a NSEC3> {
+    preuves
+        .iter()
+        .find(|(proprietaire, nsec3)| nsec3_couvre(nsec3, proprietaire, nom).unwrap_or(false))
+        .map(|(_, nsec3)| nsec3)
+}
+
+/// Plus proche enclos prouvé : le plus long ancêtre de `nom`, jusqu'à `zone`
+/// incluse, dont l'empreinte possède un NSEC3. Rend aussi le « nom suivant »,
+/// un label plus long que l'enclos, dont la couverture est exigée.
+fn enclos(preuves: &[(Name, NSEC3)], nom: &Name, zone: &Name) -> Option<(Name, Name)> {
+    let mut candidat = nom.clone();
+    loop {
+        if nsec3_trouve(preuves, &candidat).is_some() {
+            let suivant = prochain_nom(&candidat, nom)?;
+            return Some((candidat, suivant));
+        }
+        if candidat.num_labels() <= zone.num_labels() {
+            return None;
+        }
+        candidat = candidat.base_name();
+    }
+}
+
+/// Nom à un label de plus que `enclos`, sur le chemin de `nom`.
+fn prochain_nom(enclos: &Name, nom: &Name) -> Option<Name> {
+    let mut courant = nom.clone();
+    while courant.num_labels() > enclos.num_labels() + 1 {
+        courant = courant.base_name();
+    }
+    (courant.num_labels() > enclos.num_labels()).then_some(courant)
+}
+
+/// Wildcard `*.enclos`.
+fn etoile(enclos: &Name) -> Option<Name> {
+    let texte = if enclos.is_root() {
+        "*".to_string()
+    } else {
+        format!("*.{}", enclos.to_ascii())
+    };
+    Name::parse(&texte, None).ok()
+}
+
+/// Le bitmap n'annonce ni `qtype` ni un CNAME (RFC 5155 § 8.5 et 8.6).
+fn type_absent(nsec3: &NSEC3, qtype: RecordType) -> bool {
+    !nsec3.type_bit_maps().contains(&qtype) && !nsec3.type_bit_maps().contains(&RecordType::CNAME)
 }
 
 /// Vrai si l'empreinte NSEC3 de `nom` est exactement le propriétaire de
@@ -686,8 +943,8 @@ fn nodata_prouve(question: &hickory_proto::op::Query, valide: &Message) -> bool 
 /// NXDOMAIN : hickory 0.24 vérifie la couverture NSEC et l'absence de wildcard
 /// avant de rendre le message ; on exige en plus que la preuve soit RETENUE et
 /// que la SOA de la zone soit présente. Les réponses négatives NSEC3, que
-/// hickory ne sait pas valider, restent refusées : rien n'est accepté sans
-/// preuve vérifiée.
+/// hickory ne sait pas valider, ne passent jamais par ici : elles sont vérifiées
+/// séparément dans `servir_negatif_nsec3`, avec leurs propres signatures.
 fn nxdomain_prouve(question: &hickory_proto::op::Query, valide: &Message) -> bool {
     zone_autoritaire(question.name(), valide)
         && valide
@@ -1237,10 +1494,91 @@ mod tests {
         nsec3_preuve(zone, &base32hex(&empreinte), empreinte, opt_out, types)
     }
 
-    /// NSEC3 qui couvre l'empreinte de `nom` sans être au nom : propriétaire
-    /// « 000…0 », suivant l'empreinte du nom.
+    /// NSEC3 qui couvre l'empreinte de `nom` sans être au nom, avec un
+    /// propriétaire donné (une réponse réelle n'a qu'un NSEC3 par propriétaire :
+    /// deux preuves de couverture doivent donc avoir des propriétaires
+    /// distincts).
+    fn nsec3_couvrant_avec(
+        zone: &Name,
+        proprietaire: &str,
+        nom: &Name,
+        opt_out: bool,
+        types: &[RecordType],
+    ) -> Record {
+        nsec3_preuve(zone, proprietaire, nsec3_empreinte(nom), opt_out, types)
+    }
+
     fn nsec3_couvrant(zone: &Name, nom: &Name, opt_out: bool, types: &[RecordType]) -> Record {
-        nsec3_preuve(zone, &"0".repeat(32), nsec3_empreinte(nom), opt_out, types)
+        nsec3_couvrant_avec(zone, &"0".repeat(32), nom, opt_out, types)
+    }
+
+    /// Message négatif dont les preuves sont des NSEC3 : SOA de la zone et
+    /// chaque NSEC3 portent leur RRSIG (signatures valides par défaut).
+    fn message_negatif_nsec3(
+        nom: &Name,
+        rcode: ResponseCode,
+        preuves: &[Record],
+        zone: &Name,
+        signer: &SigSigner,
+    ) -> Message {
+        message_negatif_nsec3_avec(
+            nom,
+            rcode,
+            preuves,
+            zone,
+            signer,
+            signer,
+            (maintenant() - 60, maintenant() + 3600),
+        )
+    }
+
+    fn message_negatif_nsec3_avec(
+        nom: &Name,
+        rcode: ResponseCode,
+        preuves: &[Record],
+        zone: &Name,
+        signer_soa: &SigSigner,
+        signer_preuves: &SigSigner,
+        periode_preuves: (u32, u32),
+    ) -> Message {
+        let soa = Record::from_rdata(
+            zone.clone(),
+            300,
+            RData::SOA(SOA::new(
+                Name::parse("ns.example.test.", None).unwrap(),
+                Name::parse("hostmaster.example.test.", None).unwrap(),
+                1,
+                3600,
+                600,
+                86400,
+                300,
+            )),
+        );
+        let mut m = Message::new();
+        m.set_response_code(rcode);
+        m.add_query(Query::query(nom.clone(), RecordType::A));
+        m.add_name_server(soa.clone());
+        m.add_name_server(record_signe_par(
+            zone,
+            zone,
+            vec![soa],
+            signer_soa,
+            maintenant() - 60,
+            maintenant() + 3600,
+        ));
+        for preuve in preuves {
+            let proprietaire = preuve.name().clone();
+            m.add_name_server(preuve.clone());
+            m.add_name_server(record_signe_par(
+                &proprietaire,
+                zone,
+                vec![preuve.clone()],
+                signer_preuves,
+                periode_preuves.0,
+                periode_preuves.1,
+            ));
+        }
+        m
     }
 
     fn message_autorite(rr: Record) -> Message {
@@ -1356,21 +1694,146 @@ mod tests {
         assert_eq!(classer(valider(h, question(&present), ancre)), "reject");
     }
 
-    /// Limite connue (`docs/securite/problemes-connus.md`) : hickory 0.24 ne
-    /// valide que les négations NSEC, et `nxdomain_prouve`/`nodata_prouve`
-    /// n'acceptent qu'un NSEC. Un NXDOMAIN dont la seule preuve est un NSEC3
-    /// signé reste donc refusé : le client renvoie SERVFAIL au lieu du nom
-    /// inexistant, jamais une réponse acceptée sans preuve vérifiée. Ce test
-    /// fige la limite : le jour où la validation acceptera NSEC3, il échouera
-    /// et il faudra la lever dans les deux fonctions et dans les docs.
+    /// NXDOMAIN dans une zone signée en NSEC3 : plus proche enclos prouvé
+    /// (`example.test`), nom suivant couvert (`absent.example.test`) et wildcard
+    /// couvert (il n'existe pas). La réponse négative est servie avec sa SOA.
     #[test]
-    fn nxdomain_nsec3_seul_refuse() {
+    fn nxdomain_nsec3_prouve_accepte() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let sauvage = Name::parse("*.example.test.", None).unwrap();
+        let preuves = vec![
+            nsec3_au_nom(&h.zone, &h.zone, false, &[RecordType::NS, RecordType::SOA]),
+            nsec3_couvrant_avec(&h.zone, &"0".repeat(32), &absent, false, &[RecordType::A]),
+            nsec3_couvrant_avec(&h.zone, &"1".repeat(32), &sauvage, false, &[RecordType::A]),
+        ];
+        h.dns_reponse =
+            message_negatif_nsec3(&absent, ResponseCode::NXDomain, &preuves, &h.zone, &signer)
+                .to_vec()
+                .unwrap();
+        let sortie = valider(h, question(&absent), ancre).expect("NXDOMAIN NSEC3 refusé");
+        let m = Message::from_vec(&sortie).unwrap();
+        assert_eq!(m.response_code(), ResponseCode::NXDomain);
+        assert!(
+            m.name_servers()
+                .iter()
+                .any(|rr| rr.record_type() == RecordType::SOA),
+            "la SOA (TTL négatif) manque à la réponse servie"
+        );
+        assert!(
+            m.answers().is_empty(),
+            "un NXDOMAIN ne porte pas de réponse"
+        );
+    }
+
+    /// NODATA dans une zone NSEC3 : le nom existe dans la chaîne et son bitmap
+    /// n'annonce pas le type demandé.
+    #[test]
+    fn nodata_nsec3_au_nom_accepte() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let present = Name::parse("www.example.test.", None).unwrap();
+        let preuves = vec![nsec3_au_nom(
+            &h.zone,
+            &present,
+            false,
+            &[RecordType::NS, RecordType::SOA, RecordType::TXT],
+        )];
+        h.dns_reponse =
+            message_negatif_nsec3(&present, ResponseCode::NoError, &preuves, &h.zone, &signer)
+                .to_vec()
+                .unwrap();
+        let sortie = valider(h, question(&present), ancre).expect("NODATA NSEC3 refusé");
+        let m = Message::from_vec(&sortie).unwrap();
+        assert_eq!(m.response_code(), ResponseCode::NoError);
+        assert!(m.answers().is_empty());
+        assert!(m
+            .name_servers()
+            .iter()
+            .any(|rr| rr.record_type() == RecordType::SOA));
+    }
+
+    /// Preuve NSEC3 incomplète : un seul NSEC3, sans plus proche enclos ni
+    /// wildcard couvert. Rien n'est accepté sur une preuve partielle.
+    #[test]
+    fn nxdomain_nsec3_incomplet_refuse() {
         let (mut h, ancre, signer) = fixture_complete();
         let absent = Name::parse("absent.example.test.", None).unwrap();
         let nsec3 = nsec3_rr("example.test.", &absent, false, false);
-        h.dns_reponse = message_negatif(&absent, ResponseCode::NXDomain, nsec3, &h.zone, &signer)
-            .to_vec()
-            .unwrap();
+        h.dns_reponse =
+            message_negatif_nsec3(&absent, ResponseCode::NXDomain, &[nsec3], &h.zone, &signer)
+                .to_vec()
+                .unwrap();
+        assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
+    }
+
+    /// NODATA dont le NSEC3 annonce le type demandé : incohérence, refus.
+    #[test]
+    fn nodata_nsec3_annoncant_le_type_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let present = Name::parse("www.example.test.", None).unwrap();
+        let preuves = vec![nsec3_au_nom(
+            &h.zone,
+            &present,
+            false,
+            &[RecordType::A, RecordType::SOA],
+        )];
+        h.dns_reponse =
+            message_negatif_nsec3(&present, ResponseCode::NoError, &preuves, &h.zone, &signer)
+                .to_vec()
+                .unwrap();
+        assert_eq!(classer(valider(h, question(&present), ancre)), "reject");
+    }
+
+    /// Une preuve NSEC3 signée par une clé jamais publiée dans la DNSKEY n'est
+    /// pas authentifiée : la réponse négative reste refusée.
+    #[test]
+    fn negatif_nsec3_a_signature_invalide_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let sauvage = Name::parse("*.example.test.", None).unwrap();
+        let preuves = vec![
+            nsec3_au_nom(&h.zone, &h.zone, false, &[RecordType::NS, RecordType::SOA]),
+            nsec3_couvrant_avec(&h.zone, &"0".repeat(32), &absent, false, &[RecordType::A]),
+            nsec3_couvrant_avec(&h.zone, &"1".repeat(32), &sauvage, false, &[RecordType::A]),
+        ];
+        let (autre, _, _) = parent_materiel(&h.zone);
+        h.dns_reponse = message_negatif_nsec3_avec(
+            &absent,
+            ResponseCode::NXDomain,
+            &preuves,
+            &h.zone,
+            &signer,
+            &autre,
+            (maintenant() - 60, maintenant() + 3600),
+        )
+        .to_vec()
+        .unwrap();
+        assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
+    }
+
+    /// Une preuve NSEC3 archivée et rejouée hors de sa période de validité est
+    /// refusée, même si ses signatures sont authentiques.
+    #[test]
+    fn negatif_nsec3_a_signature_perimee_refuse() {
+        let (mut h, ancre, signer) = fixture_complete();
+        let absent = Name::parse("absent.example.test.", None).unwrap();
+        let sauvage = Name::parse("*.example.test.", None).unwrap();
+        let preuves = vec![
+            nsec3_au_nom(&h.zone, &h.zone, false, &[RecordType::NS, RecordType::SOA]),
+            nsec3_couvrant_avec(&h.zone, &"0".repeat(32), &absent, false, &[RecordType::A]),
+            nsec3_couvrant_avec(&h.zone, &"1".repeat(32), &sauvage, false, &[RecordType::A]),
+        ];
+        h.dns_reponse = message_negatif_nsec3_avec(
+            &absent,
+            ResponseCode::NXDomain,
+            &preuves,
+            &h.zone,
+            &signer,
+            &signer,
+            (maintenant() - 20_000, maintenant() - 10_000),
+        )
+        .to_vec()
+        .unwrap();
         assert_eq!(classer(valider(h, question(&absent), ancre)), "reject");
     }
 
