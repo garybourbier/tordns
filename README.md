@@ -12,9 +12,15 @@ d’accès.
 
 ## Télécharger
 
-La page de présentation est sur **<https://garybourbier.github.io/tordns/>**.
-Les liens ci-dessous pointent vers la dernière release GitHub ; les mêmes noms
-sont produits par `release.yml` et affichés par le site.
+La page de présentation est sur **<https://garybourbier.github.io/tordns/>**
+(version anglaise : [/en/](https://garybourbier.github.io/tordns/en/)).
+
+**Aucune release binaire n'est encore publiée.** Les liens ci-dessous pointent
+vers la dernière release GitHub et renverront donc une erreur 404 tant que le
+tag `v0.8.0` n'a pas été poussé : `release.yml` construit alors tous les
+fichiers listés, crée une release brouillon, et la publication reste un geste
+manuel (signature des APK et du manifeste comprise). La procédure complète est
+décrite dans [Publier une version](docs/publier-une-version.md).
 
 | Plateforme | Architecture | Fichier |
 |---|---|---|
@@ -175,16 +181,21 @@ signées. TorDNS ne rend pas à lui seul la navigation anonyme.
 Android et macOS croisées ; tests Go/Rust/Java ; cache et TTL négatif ; 10 000
 paquets hostiles par client ; signature et refus de manifeste ; retour arrière
 des mises à jour ; chaîne DNSSEC réelle côté Linux (nom signé accepté, nom
-cassé refusé, zone non signée reconnue) ; release locale avec `SHA256SUMS` ;
-site sans URL hors GitHub ; captures 360/1280 px.
+cassé refusé, zone non signée reconnue) ; validation DNSSEC côté Android (deux
+ancres IANA, bit DO posé, réponse sans bit AD refusée) et côté Windows (NSEC et
+NSEC3, preuve d’absence de DS, réponses négatives NXDOMAIN et NODATA) ; les
+mêmes cas de test rejoués par les trois validateurs depuis
+`testvectors/dnssec_vectors.json` ; release locale avec `SHA256SUMS` ; site sans
+URL hors GitHub ; captures 360/1280 px.
 
 **Ce qui n’est pas prouvé ici** : installation et service réels sur Windows,
 lancement macOS/`launchd`/`networksetup`, session `PackageInstaller` Android,
-DNSSEC contre les racines réelles côté Windows et Android (Linux est prouvé),
-transport Tor des mises à jour et du diagnostic DNSSEC, registre
-avec de vrais bénévoles, publication Onionbalance sur plusieurs hôtes,
-signature Developer ID/notarisation, exécution réelle des workflows GitHub et
-des attestations. Aucun audit indépendant n’a été réalisé.
+DNSSEC contre les racines réelles côté Windows et Android (Linux est prouvé ;
+les réponses NSEC3 Windows sont rejouées depuis des fixtures, pas depuis le
+réseau), transport Tor des mises à jour et du diagnostic DNSSEC, registre avec
+de vrais bénévoles, publication Onionbalance sur plusieurs hôtes, signature
+Developer ID/notarisation, attestations de provenance (aucune release publiée).
+Aucun audit indépendant n’a été réalisé.
 
 Pour signaler une faille, utiliser le
 [signalement privé GitHub](https://github.com/garybourbier/tordns/security/advisories/new)
@@ -237,6 +248,16 @@ conservées dans les commits. Les dossiers principaux :
 17. **Mission 17** — site GitHub Pages bilingue.
 18. **Mission 18** — ce README.
 19. **Mission 19** — restes de la relecture du 23/11.
+20. **Mission 20** — fuzzing des analyseurs DNS et des manifestes.
+21. **Mission 21** — compilations reproductibles et contrôlées.
+22. **Mission 22** — page publique de l’état du réseau.
+23. **Mission 23** — paquet OpenWrt pour routeurs mipsel et arm64.
+24. **Mission 24** — image nœud prête à flasher pour Raspberry Pi.
+25. **Mission 25** — dossier et jalons de publication sur F-Droid.
+26. **Mission 26** — client iOS et compilation pour le simulateur.
+27. **Mission 27** — dossier pour un audit de sécurité externe.
+28. **Mission 28** — durcissement DNSSEC : preuves d’absence, cas communs aux
+trois validateurs, réponses négatives NSEC3 côté Windows.
 
 Détail, preuves et limites : [journal des missions](docs/missions/journal.md).
 
