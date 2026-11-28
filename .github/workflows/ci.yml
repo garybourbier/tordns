@@ -146,11 +146,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      # L'action setup-android n'arrive plus à accepter les licences du SDK
+      # préinstallé (sdkmanager 16.0 rend la main sur « Review licenses ») :
+      # les paquets sont installés ici, licences acceptées par `yes`.
       - name: SDK et NDK épinglés
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install "platforms;android-34" "build-tools;36.1.0" "ndk;26.3.11579264" >/dev/null
+          SDK="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          SDKMGR=$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager | tail -1)
+          echo "ANDROID_HOME=$SDK" >>"$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >>"$GITHUB_ENV"
+          yes | "$SDKMGR" --licenses >/dev/null
+          "$SDKMGR" --install "platforms;android-34" "build-tools;36.1.0" "ndk;26.3.11579264"
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |

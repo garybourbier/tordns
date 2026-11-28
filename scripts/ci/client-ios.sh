@@ -12,7 +12,7 @@ set -euo pipefail
 
 RACINE=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CLIENT="$RACINE/client-ios"
-DESTINATION="${DESTINATION:-platform=iOS Simulator,name=iPhone 16}"
+DESTINATION="${DESTINATION:-}"
 
 etape() { printf '\n== %s ==\n' "$1"; }
 
@@ -26,6 +26,16 @@ for outil in xcodebuild xcodegen cargo; do
 		exit 1
 	}
 done
+
+# Le nom des simulateurs dépend de l'image du runner : prendre le premier
+# iPhone disponible plutôt qu'un modèle figé (iPhone 16 manque aux images 26).
+if [ -z "$DESTINATION" ]; then
+	NOM=$(xcrun simctl list devices available 2>/dev/null |
+		awk -F'[()]' '/^[[:space:]]*iPhone /{sub(/[[:space:]]+$/, "", $1); sub(/^[[:space:]]+/, "", $1); print $1; exit}')
+	[ -n "$NOM" ] || NOM=iPhone 16
+	DESTINATION="platform=iOS Simulator,name=$NOM"
+fi
+echo "Simulateur : $DESTINATION"
 
 etape "1. Tests du crate partagé et du pont C (hôte)"
 (cd "$RACINE/outils/arti-rust" && cargo test --locked --quiet)
