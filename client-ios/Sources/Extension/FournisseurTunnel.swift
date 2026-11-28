@@ -99,7 +99,7 @@ final class FournisseurTunnel: NEPacketTunnelProvider {
                     }
                 }
                 if !reponses.isEmpty {
-                    self.packetFlow.writePackets(reponses, withProtocols: reponses.map {
+                    self.packetFlow.writePackets(reponses, withProtocols: reponses.map { _ in
                         NSNumber(value: AF_INET)
                     })
                 }
